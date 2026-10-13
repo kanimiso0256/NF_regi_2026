@@ -1,0 +1,38 @@
+{
+    "terms": [
+        "1日目",
+        "2日目",
+        "3日目",
+        "4日目"
+    ],
+    "adminPass": "password",
+    "active_terms": [
+        "1日目",
+        "テスト",
+        "調整"
+    ],
+    "ngrok_token": "",
+    "mobile_password": "1234",
+    "mobile_info": "",
+    "mobile_alert": "",
+    "terminal_user": "名倉　禎稀",
+    "notify_alert": {
+        "cash": true,
+        "paypay": true
+    },
+    "ngrok_connect_enabled": true,
+    "card_settings": {
+        "width": 130,
+        "height": 0,
+        "overflow": 6
+    },
+    "menu": [
+        {
+            "name": "オリジナル",
+            "price": 450,
+            "visible": true,
+            "mobile_visible": false,
+            "order": 10
+        }
+    ]
+}
