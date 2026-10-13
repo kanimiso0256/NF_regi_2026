@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>レジシステム</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='register.css') }}">
+</head>
+<body>
+    <header class="statusbar" id="statusbar" hidden>
+        <span id="status-user"></span>
+        <span id="status-channel">CHANNEL CLOSED</span>
+    </header>
+
+    <main>
+        <!-- ログイン -->
+        <section id="view-login" class="view view-center" hidden>
+            <div class="login-card">
+                <h1>レジシステム</h1>
+                <p class="sub">Cash Register System</p>
+                <label for="login-name">端末使用者の名前</label>
+                <input id="login-name" class="input" autocomplete="off">
+                <button id="login-btn" class="btn btn-primary btn-block">システムを開始</button>
+                <p class="error" id="login-error"></p>
+            </div>
+        </section>
+
+        <!-- ダッシュボード -->
+        <section id="view-dashboard" class="view view-center" hidden>
+            <h2 class="dash-title">DASHBOARD</h2>
+            <div class="term-grid" id="term-grid"></div>
+            <button class="btn btn-ghost" data-action="qr">📱 接続QR表示</button>
+        </section>
+
+        <!-- レジ画面 -->
+        <section id="view-register" class="view register" hidden>
+            <div class="reg-header">
+                <button class="btn btn-dark" data-action="exit">← 終了 <kbd>Esc</kbd></button>
+                <div class="mode-name" id="mode-name"></div>
+                <div class="mode-note" id="mode-note"></div>
+                <div class="totals">
+                    <div class="total"><span>Term</span><strong id="total-term">¥0</strong></div>
+                    <div class="total"><span>累積</span><strong id="total-cumulative">¥0</strong></div>
+                    <div class="total"><span>総合</span><strong id="total-total">¥0</strong></div>
+                </div>
+                <div class="operator">
+                    担当 <strong id="operator-name"></strong>
+                    <button class="btn btn-dark btn-small" data-action="change-operator">変更</button>
+                </div>
+                <button class="btn btn-dark" data-action="qr">📱 QR</button>
+            </div>
+
+            <div class="cards" id="cards"></div>
+
+            <div class="draft-bar" id="draft-bar">
+                <span id="draft-summary"></span>
+                <span class="hints">F1: 全て現金へ　F2: 全てPayPayへ　BackSpace: 入力を取消</span>
+                <button class="btn btn-primary" id="commit-btn" data-action="commit">確定 <kbd>Enter</kbd></button>
+            </div>
+
+            <div class="notify-panel">
+                <div class="notify-head">
+                    モバイル注文
+                    <span class="hints">←/→: 選択　Space: 承認　Del: 取消</span>
+                </div>
+                <div class="notify-list" id="notify-list"></div>
+            </div>
+        </section>
+    </main>
+
+    <div class="modal-backdrop" id="modal" hidden>
+        <div class="modal" id="modal-body"></div>
+    </div>
+
+    <script src="{{ url_for('static', filename='register.js') }}"></script>
+</body>
+</html>
