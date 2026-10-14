@@ -99,7 +99,6 @@ async function pollConnection() {
         ui.connection = { online: false, url: null };
     }
     $("statusbar").classList.toggle("online", ui.connection.online);
-    $("status-channel").textContent = ui.connection.online ? "CHANNEL OPEN" : "CHANNEL CLOSED";
 }
 
 // ---------- ログイン・ダッシュボード ----------
