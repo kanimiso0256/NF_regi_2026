@@ -9,7 +9,6 @@
 <body>
     <header class="statusbar" id="statusbar" hidden>
         <span id="status-user"></span>
-        <span id="status-channel">CHANNEL CLOSED</span>
     </header>
 
     <main>
@@ -29,7 +28,7 @@
         <section id="view-dashboard" class="view view-center" hidden>
             <h2 class="dash-title">DASHBOARD</h2>
             <div class="term-grid" id="term-grid"></div>
-            <button class="btn btn-ghost" data-action="qr">📱 接続QR表示</button>
+            <button class="btn btn-ghost" data-action="qr">接続QR表示</button>
         </section>
 
         <!-- レジ画面 -->
@@ -39,7 +38,7 @@
                 <div class="mode-name" id="mode-name"></div>
                 <div class="mode-note" id="mode-note"></div>
                 <div class="totals">
-                    <div class="total"><span>Term</span><strong id="total-term">¥0</strong></div>
+                    <div class="total"><span>料金</span><strong id="total-term">¥0</strong></div>
                     <div class="total"><span>累積</span><strong id="total-cumulative">¥0</strong></div>
                     <div class="total"><span>総合</span><strong id="total-total">¥0</strong></div>
                 </div>
@@ -47,7 +46,7 @@
                     担当 <strong id="operator-name"></strong>
                     <button class="btn btn-dark btn-small" data-action="change-operator">変更</button>
                 </div>
-                <button class="btn btn-dark" data-action="qr">📱 QR</button>
+                <button class="btn btn-dark" data-action="qr">QR</button>
             </div>
 
             <div class="cards" id="cards"></div>
