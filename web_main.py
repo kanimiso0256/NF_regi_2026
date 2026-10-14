@@ -6,11 +6,16 @@
 で起動すると http://127.0.0.1:5002/ がブラウザで開く。
 見た目は static/register.css、画面の動きは static/register.js で編集できる。
 
+    python web_main.py --dev
+
+で起動すると、register.css を保存するたびにページを再読み込みせずに見た目だけ反映される。
+
 データ（system_data/）は Tkinter 版 main.py と共通。
 両方を同時に起動すると、同じファイルへの書き込みやポートが衝突するので、どちらか一方だけを使うこと。
 """
 import io
 import logging
+import os
 import sys
 import threading
 import webbrowser
@@ -30,7 +35,7 @@ HOST = "127.0.0.1"
 PORT = 5002
 
 
-def create_app(state):
+def create_app(state, dev=False):
     app = Flask(__name__)
 
     @app.before_request
@@ -48,7 +53,13 @@ def create_app(state):
 
     @app.get("/")
     def index():
-        return render_template("register.html")
+        return render_template("register.html", dev=dev)
+
+    if dev:
+        @app.get("/dev/css-mtime")
+        def get_css_mtime():
+            # CSS の更新日時。ブラウザ側がこれを監視して変わったら CSS だけ読み直す
+            return str(os.path.getmtime(os.path.join(app.static_folder, "register.css")))
 
     @app.get("/pc/api/state")
     def get_state():
@@ -120,10 +131,13 @@ def main():
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
     dm = DataManager()
     dm.log_action("System", "System", "Startup", "WebApp", "Launched")
-    app = create_app(RegisterState(dm))
+    dev = "--dev" in sys.argv
+    app = create_app(RegisterState(dm), dev=dev)
 
     url = f"http://{HOST}:{PORT}/"
     print(f"レジ画面: {url}  （終了するにはこのウィンドウで Ctrl+C）")
+    if dev:
+        print("開発モード: register.css を保存すると自動で反映されます")
     if "--no-browser" not in sys.argv:
         threading.Timer(1.0, webbrowser.open, args=(url,)).start()
     app.run(host=HOST, port=PORT, threaded=True, use_reloader=False)

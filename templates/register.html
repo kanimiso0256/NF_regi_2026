@@ -72,5 +72,30 @@
     </div>
 
     <script src="{{ url_for('static', filename='register.js') }}"></script>
+    {% if dev %}
+    <script>
+        // 開発モード: register.css の更新を監視し、ページを再読み込みせずに CSS だけ差し替える
+        (() => {
+            let last = null;
+            setInterval(async () => {
+                let mtime;
+                try {
+                    mtime = await (await fetch("/dev/css-mtime", { cache: "no-store" })).text();
+                } catch (e) {
+                    return;
+                }
+                if (last !== null && mtime !== last) {
+                    const old = document.querySelector('link[href*="register.css"]');
+                    const next = old.cloneNode();
+                    next.href = old.href.split("?")[0] + "?v=" + mtime;
+                    // 新しい CSS の読み込みが終わってから古い方を消す（ちらつき防止）
+                    next.onload = () => old.remove();
+                    old.after(next);
+                }
+                last = mtime;
+            }, 500);
+        })();
+    </script>
+    {% endif %}
 </body>
 </html>
