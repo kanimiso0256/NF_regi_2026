@@ -1,0 +1,458 @@
+/* register.css — ブラウザ版レジ画面の見た目
+   色・サイズは :root の変数を変えると全体に反映されます。 */
+
+:root {
+    --bg: #eceff1;
+    --surface: #ffffff;
+    --text: #263238;
+    --text-sub: #607d8b;
+    --line: #dde3e7;
+    --dark: #263238;
+    --dark-2: #37474f;
+
+    --primary: #030303;
+    --primary-hover: #333333;
+    --danger: #e53935;
+    --highlight: #ffd600;
+
+    --cash: #2e7d32;
+    --cash-bg: #e8f5e9;
+    --cash-btn: #a5d6a7;
+    --pay: #c62828;
+    --pay-bg: #ffebee;
+    --pay-btn: #ef9a9a;
+
+    --draft-pos: #1976d2;
+    --draft-neg: #d32f2f;
+    --online: #43a047;
+    --offline: #78909c;
+    --mob-on: #009688;
+    --watch-bg: #fff8e1;
+    --watch-text: #ef6c00;
+
+    --card-width: 150px;   /* カード表示設定の「横幅」で上書きされます */
+    --radius: 5px;
+    --shadow: 0 1px 3px rgba(0, 0, 0, .08), 0 1px 2px rgba(0, 0, 0, .06);
+    --font: "Segoe UI", "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif;
+    --font-num: "Segoe UI", "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif;   /* 金額・個数用 */
+}
+
+/* ---------- 基本 ---------- */
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+html, body { height: 100%; margin: 0; }
+body {
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    overflow: hidden;
+}
+
+button { font: inherit; cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .45; }
+
+kbd {
+    font-family: inherit;
+    font-size: .72em;
+    font-weight: 600;
+    padding: 1px 5px;
+    margin-left: 4px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, .1);
+}
+
+.btn {
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-weight: 600;
+    background: var(--surface);
+    color: var(--text);
+    transition: background .15s, transform .05s;
+}
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+.btn-dark { background: rgba(255, 255, 255, .12); color: #fff; }
+.btn-dark:hover { background: rgba(255, 255, 255, .22); }
+.btn-ghost { background: transparent; border: 1px solid #b0bec5; }
+.btn-ghost:hover { background: rgba(0, 0, 0, .04); }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-small { padding: 4px 10px; font-size: 12px; }
+.btn-block { width: 100%; }
+
+.input {
+    width: 100%;
+    padding: 12px;
+    font: inherit;
+    font-size: 18px;
+    text-align: center;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fafafa;
+}
+.input:focus { outline: 2px solid var(--primary); border-color: transparent; }
+
+.error { color: var(--danger); font-size: 13px; min-height: 1em; margin: 0; }
+
+/* ---------- 数字（金額・個数） ----------
+   1秒ごとに書き換わるので、数字の幅をそろえて桁が左右にガタつかないようにする */
+.total strong,
+.item-price,
+.card-stats b,
+.pay-count,
+.pay-draft,
+#draft-summary,
+.notif-type,
+.summary .num,
+.summary-total,
+.numpad-head small,
+.numpad-display strong,
+.numpad-display b {
+    font-family: var(--font-num);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ---------- ステータスバー ---------- */
+.statusbar {
+    flex-shrink: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 30px;
+    padding: 0 20px;
+    background: var(--offline);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+}
+.statusbar.online { background: var(--online); }
+
+main { flex: 1; min-height: 0; display: flex; }
+.view { flex: 1; min-width: 0; }
+.view-center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    padding: 24px;
+}
+
+/* ---------- ログイン ---------- */
+.login-card {
+    width: min(400px, 100%);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 40px;
+    text-align: center;
+    background: var(--surface);
+    border-radius: 14px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, .08);
+}
+.login-card h1 { margin: 0; font-size: 26px; }
+.login-card .sub { margin: 0 0 16px; color: var(--text-sub); font-size: 13px; }
+.login-card label { text-align: left; font-size: 13px; color: var(--text-sub); }
+
+/* ---------- ダッシュボード ---------- */
+.dash-title { margin: 0; letter-spacing: .1em; }
+.term-grid { display: grid; grid-template-columns: repeat(2, 220px); gap: 16px; }
+.term-btn {
+    height: 72px;
+    border: none;
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 20px;
+    font-weight: 700;
+    box-shadow: var(--shadow);
+}
+.term-btn:hover:not(:disabled) { outline: 3px solid var(--primary); }
+.term-adjust { background: #ffcc80; color: #e65100; }
+.term-test { background: #90caf9; color: #1565c0; }
+.term-btn:disabled { background: #cfd8dc; color: #90a4ae; box-shadow: none; }
+
+/* ---------- レジ画面 ---------- */
+.register {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto 180px;
+}
+
+.reg-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 20px;
+    background: var(--dark-2);
+    color: #fff;
+}
+.mode-name { font-size: 20px; font-weight: 700; }
+.mode-note {
+    padding: 2px 10px;
+    border-radius: 99px;
+    background: var(--highlight);
+    color: #000;
+    font-size: 12px;
+    font-weight: 600;
+}
+.mode-note:empty { display: none; }
+.totals { display: flex; gap: 10px; margin-left: auto; }
+.total {
+    min-width: 120px;
+    padding: 4px 14px;
+    text-align: center;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, .2);
+}
+.total span { display: block; font-size: 11px; color: #b0bec5; }
+.total strong { font-size: 20px; color: #81c784; }
+.operator { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+
+/* ---------- 商品カード ---------- */
+.cards {
+    display: flex;
+    align-items: stretch;
+    gap: 12px;
+    padding: 16px 20px;
+    overflow-x: auto;
+}
+.card {
+    flex: 0 0 var(--card-width);
+    min-width: 140px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--surface);
+    border: 2px solid transparent;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+.card.has-draft { border-color: var(--draft-pos); }
+
+.mob-toggle {
+    padding: 6px;
+    border: none;
+    background: #cfd8dc;
+    color: #546e7a;
+    font-size: 12px;
+    font-weight: 700;
+}
+.card.mobile-on .mob-toggle { background: var(--mob-on); color: #fff; }
+
+.card-head { padding: 8px 8px 4px; text-align: center; }
+.item-name {
+    font-size: 15px;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.item-price { font-size: 12px; color: var(--text-sub); }
+
+.card-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    padding: 0 6px 8px;
+    text-align: center;
+    font-size: 12px;
+}
+.card-stats span { display: block; font-size: 10px; font-weight: 700; color: #999; }
+
+.pay-cols {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--line);
+}
+.pay-col { display: flex; flex-direction: column; gap: 4px; min-height: 0; padding: 6px 4px; }
+.pay-cash { background: var(--cash-bg); color: var(--cash); }
+.pay-paypay { background: var(--pay-bg); color: var(--pay); }
+.pay-title { text-align: center; font-size: 11px; font-weight: 700; }
+.pay-count { text-align: center; font-size: 24px; font-weight: 800; line-height: 1.1; }
+.pay-draft {
+    align-self: center;
+    min-height: 20px;
+    padding: 0 8px;
+    border-radius: 99px;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+}
+.pay-draft.pos { background: var(--draft-pos); }
+.pay-draft.neg { background: var(--draft-neg); }
+
+.pay-btn {
+    flex: 1;
+    min-height: 40px;
+    border: none;
+    border-radius: 6px;
+    color: inherit;
+    font-size: 18px;
+    font-weight: 700;
+}
+.pay-btn:hover { filter: brightness(.95); }
+.pay-cash .pay-add, .pay-cash .pay-sub { background: var(--cash-btn); }
+.pay-paypay .pay-add, .pay-paypay .pay-sub { background: var(--pay-btn); }
+.pay-pad { background: rgba(255, 255, 255, .8); font-size: 15px; }
+
+.watchers { min-height: 28px; padding: 4px 8px; font-size: 12px; color: #999; }
+.card.watched .watchers { background: var(--watch-bg); color: var(--watch-text); font-weight: 600; }
+
+.empty { margin: auto; color: var(--text-sub); }
+
+/* ---------- 未確定バー ---------- */
+.draft-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 20px;
+    background: var(--surface);
+    border-top: 1px solid var(--line);
+}
+.draft-bar.active { background: #e3f2fd; }
+#draft-summary { font-size: 16px; font-weight: 700; }
+.hints { margin-left: auto; color: var(--text-sub); font-size: 12px; }
+.draft-bar .btn-primary { padding: 10px 28px; font-size: 16px; }
+
+/* ---------- モバイル注文 ---------- */
+.notify-panel { display: flex; flex-direction: column; min-height: 0; background: var(--dark-2); }
+.notify-head {
+    display: flex;
+    gap: 16px;
+    padding: 6px 20px;
+    background: var(--dark);
+    color: #eceff1;
+    font-size: 13px;
+    font-weight: 700;
+}
+.notify-head .hints { margin-left: 0; color: #90a4ae; }
+.notify-list {
+    flex: 1;
+    display: flex;
+    align-items: stretch;
+    gap: 10px;
+    padding: 10px 20px;
+    overflow-x: auto;
+}
+.notif {
+    flex: 0 0 200px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 10px;
+    background: #fff;
+    border: 3px solid transparent;
+    border-radius: 8px;
+    font-size: 12px;
+    cursor: pointer;
+}
+.notif.selected { border-color: #2196f3; background: #fffde7; }
+.notif.flash { animation: flash .3s 4 alternate; }
+@keyframes flash {
+    to { border-color: var(--highlight); box-shadow: 0 0 0 4px var(--highlight); }
+}
+.notif-top { display: flex; justify-content: space-between; }
+.notif-top time { color: #90a4ae; }
+.notif-type { font-weight: 700; }
+.notif-cash { color: var(--cash); }
+.notif-paypay { color: var(--pay); }
+.notif-items {
+    flex: 1;
+    overflow: hidden;
+    color: #333;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+.notif-actions { display: flex; gap: 6px; }
+.notif-actions .btn { flex: 1; }
+.btn-ok { background: var(--cash-bg); color: var(--cash); }
+.btn-ng { background: var(--pay-bg); color: var(--pay); }
+.notif-empty { margin: auto; color: #90a4ae; font-size: 13px; }
+
+/* ---------- モーダル ---------- */
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(38, 50, 56, .55);
+}
+.modal {
+    width: min(460px, 100%);
+    max-height: 90vh;
+    overflow: auto;
+    padding: 24px;
+    background: var(--surface);
+    border-radius: 14px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, .25);
+}
+.modal h2 { margin: 0 0 4px; font-size: 20px; }
+.modal-sub, .modal-message { margin: 0 0 16px; color: var(--text-sub); white-space: pre-line; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+
+.summary { width: 100%; border-collapse: collapse; font-size: 14px; }
+.summary th {
+    padding: 6px 4px;
+    text-align: left;
+    font-size: 12px;
+    color: var(--text-sub);
+    border-bottom: 2px solid var(--line);
+}
+.summary td { padding: 8px 4px; border-bottom: 1px solid var(--line); }
+.summary .num { text-align: right; }
+.ptag { padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 700; }
+.ptag-cash { background: var(--cash-bg); color: var(--cash); }
+.ptag-paypay { background: var(--pay-bg); color: var(--pay); }
+.summary-total {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-top: 12px;
+    padding: 12px 16px;
+    background: var(--bg);
+    border-radius: 8px;
+}
+.summary-total strong { font-size: 26px; }
+
+/* テンキー */
+.numpad-head {
+    display: flex;
+    flex-direction: column;
+    margin: -24px -24px 0;
+    padding: 16px 24px;
+    border-radius: 14px 14px 0 0;
+    font-size: 13px;
+}
+.numpad-cash { background: var(--cash-bg); color: var(--cash); }
+.numpad-paypay { background: var(--pay-bg); color: var(--pay); }
+.numpad-head strong { font-size: 18px; color: var(--text); }
+.numpad-head small { color: var(--text-sub); }
+.numpad-display { padding: 16px 0; text-align: right; }
+.numpad-display strong { display: block; font-size: 40px; }
+.numpad-display span { color: var(--text-sub); }
+.numpad-display b { font-size: 20px; color: var(--text); }
+.numpad-keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.numpad-key {
+    height: 56px;
+    border: none;
+    border-radius: 8px;
+    background: var(--bg);
+    font-size: 22px;
+    font-weight: 600;
+}
+.numpad-key:hover { background: #dfe4e7; }
+
+/* QR */
+.qr { display: block; width: 260px; height: 260px; margin: 8px auto 16px; image-rendering: pixelated; }
+.error-box { padding: 12px; border-radius: 8px; background: #ffebee; color: #c62828; }
