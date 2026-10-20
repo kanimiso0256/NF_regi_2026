@@ -160,7 +160,9 @@ main { flex: 1; min-height: 0; display: flex; }
 
 /* ---------- ダッシュボード ---------- */
 .dash-title { margin: 0; letter-spacing: .1em; }
-.term-grid { display: grid; grid-template-columns: repeat(2, 220px); gap: 16px; }
+/* 1日目〜4日目を横一列に並べ、調整・テストは次の段の中央（2〜3列目）に置く */
+.term-grid { display: grid; grid-template-columns: repeat(4, 220px); gap: 16px; }
+.term-normal + .term-btn:not(.term-normal) { grid-column-start: 2; }
 .term-btn {
     height: 72px;
     border: none;
@@ -172,8 +174,8 @@ main { flex: 1; min-height: 0; display: flex; }
     box-shadow: var(--shadow);
 }
 .term-btn:hover:not(:disabled) { outline: 3px solid var(--primary); }
-.term-adjust { background: #ffcc80; color: #e65100; }
-.term-test { background: #90caf9; color: #1565c0; }
+.term-adjust { background: #78f8ff; color: #000707; }
+.term-test { background: #3fa6f9; color: #00050b; }
 .term-btn:disabled { background: #cfd8dc; color: #90a4ae; box-shadow: none; }
 
 /* ---------- レジ画面 ---------- */
@@ -206,11 +208,11 @@ main { flex: 1; min-height: 0; display: flex; }
     min-width: 120px;
     padding: 4px 14px;
     text-align: center;
-    border-radius: 8px;
+    border-radius: 5px;
     background: rgba(0, 0, 0, .2);
 }
 .total span { display: block; font-size: 11px; color: #b0bec5; }
-.total strong { font-size: 20px; color: #81c784; }
+.total strong { font-size: 20px; color: #ffffff; }
 .operator { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 
 /* ---------- 商品カード ---------- */
