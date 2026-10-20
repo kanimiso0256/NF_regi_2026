@@ -1,2 +1,4 @@
 __pycache__/
 system_data/logs/
+system_data/settings.json
+system_data/data/
