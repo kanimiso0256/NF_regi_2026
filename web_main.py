@@ -9,6 +9,7 @@
     python web_main.py --dev
 
 で起動すると、register.css を保存するたびにページを再読み込みせずに見た目だけ反映される。
+register.html と register.js は保存後にブラウザで F5 を押せば反映される（再起動は不要）。
 
 データ（system_data/）は Tkinter 版 main.py と共通。
 両方を同時に起動すると、同じファイルへの書き込みやポートが衝突するので、どちらか一方だけを使うこと。
@@ -37,6 +38,8 @@ PORT = 5002
 
 def create_app(state, dev=False):
     app = Flask(__name__)
+    # 開発モードでは register.html の変更を再起動なしで反映する（F5 で読み直す）
+    app.config["TEMPLATES_AUTO_RELOAD"] = dev
 
     @app.before_request
     def require_json_for_post():
