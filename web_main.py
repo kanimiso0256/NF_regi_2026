@@ -23,6 +23,7 @@ import webbrowser
 
 from flask import Flask, abort, jsonify, render_template, request, send_file
 
+import analytics
 from data_manager import DataManager
 from register_state import RegisterError, RegisterState
 
@@ -71,6 +72,29 @@ def create_app(state, dev=False):
     @app.get("/pc/api/dashboard")
     def get_dashboard():
         return jsonify(state.dashboard())
+
+    @app.get("/pc/api/analytics")
+    def get_analytics():
+        return jsonify(analytics.build(state.dm, request.args.get("term"), state.current_mode))
+
+    @app.post("/pc/api/admin/login")
+    def post_admin_login():
+        return jsonify({"token": state.admin_login(body().get("password"))})
+
+    def require_admin():
+        if not state.is_admin(request.headers.get("X-Admin-Token")):
+            abort(401)
+
+    @app.get("/pc/api/admin/settings")
+    def get_admin_settings():
+        require_admin()
+        return jsonify(state.admin_settings())
+
+    @app.post("/pc/api/admin/settings")
+    def post_admin_settings():
+        require_admin()
+        state.save_admin_settings(body())
+        return jsonify(state.admin_settings())
 
     @app.get("/pc/api/connection")
     def get_connection():

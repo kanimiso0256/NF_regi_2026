@@ -8,6 +8,8 @@ MobileServer は Tkinter 版の App を前提に作られているため、
 同じ属性・メソッド（root.after, current_mode, active_sales_mode,
 get_active_menu_status, update_cart_monitor, process_mobile_order_batch）をここで用意する。
 """
+import re
+import secrets
 import threading
 import uuid
 from collections import defaultdict
@@ -19,6 +21,8 @@ from mobile_server import MobileServer
 PTYPES = ("cash", "paypay")
 PTYPE_JP = {"cash": "現金", "paypay": "PayPay"}
 SPECIAL_TERMS = ("調整", "テスト")
+# 期間名はそのまま CSV のファイル名になるので、ファイル名に使えない文字は禁止する
+BAD_NAME_CHARS = re.compile(r'[\\/:*?"<>|]')
 
 # main.py の load_items_and_data と同じキー割り当て（現金 ＋/入力/－, PayPay ＋/入力/－）
 SHORTCUT_KEYS = [
@@ -66,6 +70,8 @@ class RegisterState:
         self._notify_alert = {"cash": False, "paypay": False}
         self._card_width = 150
 
+        self._admin_token = None
+
     # ---------- ログイン・接続 ----------
     def login(self, name):
         name = str(name or "").strip()
@@ -99,6 +105,103 @@ class RegisterState:
         kinds = {"調整": "adjust", "テスト": "test"}
         terms = settings.get("terms", []) + list(SPECIAL_TERMS)
         return {"terms": [{"name": t, "enabled": t in active, "kind": kinds.get(t, "normal")} for t in terms]}
+
+    # ---------- 管理者設定 ----------
+    def admin_login(self, password):
+        with self._lock:
+            settings = self.dm.load_settings()
+            if str(password or "") != str(settings.get("adminPass", "")):
+                self.dm.log_action(self.terminal_user, "Settings", "AdminLogin", "Web", "Failed")
+                raise RegisterError("パスワードが違います")
+            self._admin_token = secrets.token_urlsafe(24)
+            self.dm.log_action(self.terminal_user, "Settings", "AdminLogin", "Web", "Success")
+            return self._admin_token
+
+    def is_admin(self, token):
+        return bool(token and self._admin_token and secrets.compare_digest(token, self._admin_token))
+
+    def admin_settings(self):
+        with self._lock:
+            settings = self.dm.load_settings()
+        menu = sorted(settings.get("menu", []), key=lambda m: m.get("order", 9999))
+        terms = settings.get("terms", [])
+        targets = settings.get("targets", {})
+        return {
+            "menu": [{
+                "name": m["name"],
+                "price": int(m.get("price", 0)),
+                "visible": bool(m.get("visible", True)),
+                "mobile_visible": bool(m.get("mobile_visible", False)),
+            } for m in menu],
+            "terms": terms,
+            "special_terms": list(SPECIAL_TERMS),
+            "active_terms": settings.get("active_terms", []),
+            "targets": {t: int(targets.get(t, 0) or 0) for t in terms},
+            "mobile_password": settings.get("mobile_password", ""),
+            "operating": self.active_sales_mode,
+        }
+
+    def save_admin_settings(self, data):
+        terms = [str(t).strip() for t in data.get("terms") or []]
+        if not terms:
+            raise RegisterError("期間を1つ以上登録してください")
+        self._check_names(terms, "期間名")
+        for t in terms:
+            if t in SPECIAL_TERMS:
+                raise RegisterError(f"「{t}」は期間名に使えません")
+
+        menu = []
+        for m in data.get("menu") or []:
+            menu.append({
+                "name": str(m.get("name", "")).strip(),
+                "price": self._to_int(m.get("price"), "価格"),
+                "visible": bool(m.get("visible")),
+                "mobile_visible": bool(m.get("mobile_visible")),
+                "order": (len(menu) + 1) * 10,
+            })
+        self._check_names([m["name"] for m in menu], "商品名")
+
+        targets = {t: self._to_int((data.get("targets") or {}).get(t), "目標金額") for t in terms}
+        selectable = set(terms) | set(SPECIAL_TERMS)
+        active = [t for t in data.get("active_terms") or [] if t in selectable]
+
+        mobile_password = str(data.get("mobile_password") or "").strip()
+        if not mobile_password:
+            raise RegisterError("モバイル用パスワードを入力してください")
+
+        with self._lock:
+            settings = self.dm.load_settings()
+            settings.update({
+                "terms": terms,
+                "menu": menu,
+                "targets": targets,
+                "active_terms": active,
+                "mobile_password": mobile_password,
+            })
+            self.dm.save_settings_file(settings)
+            self.dm.log_action(self.terminal_user, "Settings", "UpdateSettings", "Web", "Updated")
+
+    @staticmethod
+    def _check_names(names, label):
+        seen = set()
+        for n in names:
+            if not n:
+                raise RegisterError(f"{label}が空の行があります")
+            if BAD_NAME_CHARS.search(n):
+                raise RegisterError(f"{label}「{n}」に使えない文字が含まれています")
+            if n in seen:
+                raise RegisterError(f"{label}「{n}」が重複しています")
+            seen.add(n)
+
+    @staticmethod
+    def _to_int(value, label):
+        try:
+            n = int(value or 0)
+        except (TypeError, ValueError):
+            raise RegisterError(f"{label}は数字で入力してください")
+        if n < 0:
+            raise RegisterError(f"{label}にマイナスは入力できません")
+        return n
 
     # ---------- 販売モード ----------
     def start_operation(self, mode, operator):

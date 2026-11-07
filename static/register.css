@@ -1,4 +1,4 @@
-/* register.css — ブラウザ版レジ画面の見た目
+/* register.css — ブラウザ版レジの見た目（サイドバー・ダッシュボード・レジ画面・設定）
    色・サイズは :root の変数を変えると全体に反映されます。 */
 
 :root {
@@ -35,6 +35,24 @@
     --shadow: 0 1px 3px rgba(0, 0, 0, .08), 0 1px 2px rgba(0, 0, 0, .06);
     --font: "Segoe UI", "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif;
     --font-num: "Segoe UI", "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif;   /* 金額・個数用 */
+
+    /* サイドバー・ダッシュボード・設定 */
+    --font-ui: "Noto Sans JP", "Yu Gothic UI", "Hiragino Sans", Meiryo, sans-serif;
+    --page-bg: #ebebeb;
+    --side-width: 270px;
+    --side-bg: #6b6b6b;
+    --side-active: #2e2e2e;
+    --side-line: rgba(255, 255, 255, .14);
+    --accent: #1fb3c6;
+    --ink: #333333;
+    --label: #8a8a8a;
+    --panel-radius: 2px;
+    --line-chart: #5b7ba6;
+    --gauge: #6c63ff;
+    --up: #16a34a;
+    --up-bg: #e6f7ed;
+    --down: #dc2626;
+    --down-bg: #fdecec;
 }
 
 /* ---------- 基本 ---------- */
@@ -111,38 +129,28 @@ kbd {
 .summary-total,
 .numpad-head small,
 .numpad-display strong,
-.numpad-display b {
+.numpad-display b,
+.kpi,
+.mix-pct,
+.delta,
+.field.num,
+.nav-badge,
+.chart .axis,
+.donut-value,
+.gauge-value {
     font-family: var(--font-num);
     font-variant-numeric: tabular-nums;
 }
 
-/* ---------- ステータスバー ---------- */
-.statusbar {
-    flex-shrink: 0;
+/* ---------- ログイン ---------- */
+.login {
+    flex: 1;
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    height: 30px;
-    padding: 0 20px;
-    background: var(--offline);
-    color: #fff;
-    font-size: 13px;
-    font-weight: 600;
-}
-.statusbar.online { background: var(--online); }
-
-main { flex: 1; min-height: 0; display: flex; }
-.view { flex: 1; min-width: 0; }
-.view-center {
-    display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 24px;
     padding: 24px;
+    background: var(--page-bg);
 }
-
-/* ---------- ログイン ---------- */
 .login-card {
     width: min(400px, 100%);
     display: flex;
@@ -151,35 +159,390 @@ main { flex: 1; min-height: 0; display: flex; }
     padding: 40px;
     text-align: center;
     background: var(--surface);
-    border-radius: 14px;
+    border-top: 4px solid var(--accent);
     box-shadow: 0 8px 30px rgba(0, 0, 0, .08);
 }
-.login-card h1 { margin: 0; font-size: 26px; }
-.login-card .sub { margin: 0 0 16px; color: var(--text-sub); font-size: 13px; }
-.login-card label { text-align: left; font-size: 13px; color: var(--text-sub); }
+.login-brand { margin: 0; color: var(--accent); font-size: 13px; letter-spacing: .2em; text-transform: uppercase; }
+.login-card h1 { margin: 0 0 16px; font-size: 26px; font-weight: 500; }
+.login-card label { text-align: left; font-size: 13px; color: var(--label); }
 
-/* ---------- ダッシュボード ---------- */
-.dash-title { margin: 0; letter-spacing: .1em; }
-/* 1日目〜4日目を横一列に並べ、調整・テストは次の段の中央（2〜3列目）に置く */
-.term-grid { display: grid; grid-template-columns: repeat(4, 220px); gap: 16px; }
-.term-normal + .term-btn:not(.term-normal) { grid-column-start: 2; }
-.term-btn {
-    height: 72px;
-    border: none;
-    border-radius: var(--radius);
-    background: var(--surface);
-    color: var(--text);
-    font-size: 20px;
-    font-weight: 700;
-    box-shadow: var(--shadow);
+/* ---------- 画面全体（サイドバー＋メイン） ---------- */
+.app { flex: 1; min-height: 0; display: flex; }
+
+.sidebar {
+    flex: 0 0 var(--side-width);
+    display: flex;
+    flex-direction: column;
+    background: var(--side-bg);
+    color: #fff;
+    font-family: var(--font-ui);
 }
-.term-btn:hover:not(:disabled) { outline: 3px solid var(--primary); }
-.term-adjust { background: #78f8ff; color: #000707; }
-.term-test { background: #3fa6f9; color: #00050b; }
-.term-btn:disabled { background: #cfd8dc; color: #90a4ae; box-shadow: none; }
+.brand {
+    margin: 0 16px;
+    padding: 30px 12px 12px;
+    border-bottom: 1px solid var(--side-line);
+    font-size: 26px;
+    font-weight: 300;
+    letter-spacing: .02em;
+    white-space: nowrap;
+}
+.side-user {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 18px 32px;
+    font-size: 15px;
+}
+.side-user span { flex: 1; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.icon {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.nav { display: flex; flex-direction: column; margin-top: 12px; }
+.nav-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 44px;
+    height: 52px;
+    padding: 0 0 0 34px;
+    border: none;
+    border-bottom: 1px solid var(--side-line);
+    background: transparent;
+    color: #fff;
+    font-size: 26px;
+    font-weight: 300;
+    text-align: left;
+}
+.nav-item:first-child { border-top: 1px solid var(--side-line); }
+/* カーソルを乗せると背景が左から塗られ、離すと右へ抜けていく（文字の後ろに敷くため isolation で重なりを閉じる） */
+.nav-item { isolation: isolate; }
+.nav-item::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: rgba(255, 255, 255, .12);
+    transform: scaleX(0);
+    transform-origin: right;
+    transition: transform .3s cubic-bezier(.4, 0, .2, 1);
+}
+.nav-item:hover::after { transform: scaleX(1); transform-origin: left; }
+
+/* カーソルを乗せたときのアイコンの動き（家は跳ねる・カートは揺れる・歯車は回る） */
+.nav-item[data-nav="dashboard"]:hover .icon { animation: nav-bounce .45s ease-out; }
+.nav-item[data-nav="register"] .icon { transform-origin: 50% 85%; }
+.nav-item[data-nav="register"]:hover .icon { animation: nav-wiggle .5s ease-in-out; }
+.nav-item[data-nav="settings"] .icon { transition: transform .5s cubic-bezier(.34, 1.56, .64, 1); }
+.nav-item[data-nav="settings"]:hover .icon { transform: rotate(90deg); }
+@keyframes nav-bounce {
+    40% { transform: translateY(-5px); }
+    70% { transform: translateY(1px); }
+}
+@keyframes nav-wiggle {
+    25% { transform: rotate(-12deg); }
+    50% { transform: rotate(10deg); }
+    75% { transform: rotate(-5deg); }
+}
+/* OS で「視差効果を減らす」を設定している人には動かさない */
+@media (prefers-reduced-motion: reduce) {
+    .nav-item .icon { animation: none !important; transition: none !important; transform: none !important; }
+    .nav-item::after { transition: none; }
+}
+.nav-item.active { background: var(--side-active); }
+.nav-item.active::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 8px;
+    background: var(--accent);
+}
+.nav-badge {
+    min-width: 24px;
+    margin-left: auto;
+    margin-right: 16px;
+    padding: 1px 7px;
+    border-radius: 99px;
+    background: var(--highlight);
+    color: #000;
+    font-size: 14px;
+    font-weight: 700;
+    text-align: center;
+}
+
+.side-status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: auto;
+    padding: 16px 34px;
+    border: none;
+    border-top: 1px solid var(--side-line);
+    background: transparent;
+    color: rgba(255, 255, 255, .75);
+    font-size: 13px;
+    text-align: left;
+}
+.side-status:hover { background: rgba(255, 255, 255, .08); }
+.status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--offline); }
+.side-status.online .status-dot { background: var(--online); box-shadow: 0 0 0 3px rgba(67, 160, 71, .35); }
+
+.main { flex: 1; min-width: 0; display: flex; background: var(--page-bg); }
+.view { flex: 1; min-width: 0; }
+
+/* 見出し（ダッシュボード・設定で共通） */
+.eyebrow {
+    margin: 0 0 8px;
+    color: var(--accent);
+    font-family: var(--font-ui);
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: .18em;
+}
+.page-title, .panel-title { margin: 0; color: var(--ink); font-family: var(--font-ui); font-weight: 700; }
+.page-title { font-size: 28px; }
+.panel-title { font-size: 28px; }
+
+/* ---------- ダッシュボード ----------
+   4つのカードがスクロールせずに 1 画面に収まるよう、文字やグラフの大きさを画面の高さ（vh）に合わせて伸縮させる。
+   clamp(最小, 画面に合わせた値, 最大) の「最大」が大きい画面（写真のデザイン）での大きさ。 */
+.dashboard { display: flex; flex-direction: column; min-height: 0; overflow: hidden; font-family: var(--font-ui); }
+
+/* 期間のタブ（ダッシュボードとレジで共通） */
+.tabs {
+    flex-shrink: 0;
+    display: flex;
+    gap: 8px;
+    padding: 0 clamp(16px, 2.5vw, 40px);
+    background: var(--surface);
+    font-family: var(--font-ui);
+    overflow-x: auto;
+}
+.tab {
+    min-width: clamp(90px, 9vw, 140px);
+    padding: clamp(8px, 1.6vh, 18px) 16px clamp(6px, 1.2vh, 14px);
+    border: none;
+    border-bottom: clamp(3px, .45vh, 5px) solid transparent;
+    background: transparent;
+    color: var(--label);
+    font-size: clamp(16px, 2.4vh, 26px);
+    font-weight: 400;
+}
+.tab:hover { color: var(--ink); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-empty { padding: 24px 0; color: var(--label); }
+
+.dash-grid {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    gap: clamp(10px, 2vh, 22px) clamp(12px, 2.2vw, 40px);
+    padding: clamp(10px, 3vh, 34px) clamp(12px, 1.5vw, 24px) clamp(10px, 2vh, 24px);
+}
+.panel {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    padding: clamp(14px, 4vh, 48px) clamp(18px, 2.6vw, 48px) clamp(12px, 3.4vh, 40px);
+    background: var(--surface);
+    border-radius: var(--panel-radius);
+}
+.dash-grid .panel { overflow: hidden; }
+.dashboard .eyebrow { margin-bottom: clamp(2px, .7vh, 8px); font-size: clamp(10px, 1.3vh, 14px); }
+.dashboard .panel-title { flex-shrink: 0; margin-bottom: clamp(6px, 2vh, 24px); font-size: clamp(16px, 2.6vh, 28px); }
+
+.kpi-label { display: block; margin-bottom: clamp(2px, .5vh, 6px); color: var(--label); font-size: clamp(11px, 1.6vh, 17px); }
+.kpi { display: block; color: var(--ink); font-size: clamp(18px, 3.5vh, 38px); font-weight: 300; line-height: 1.2; }
+.kpi-xl { font-size: clamp(22px, 4.4vh, 48px); }
+.kpi-s { font-size: clamp(14px, 2.2vh, 24px); }
+.kpi.up { color: var(--up); }
+.kpi.down { color: var(--down); }
+
+.kpis {
+    flex-shrink: 0;
+    display: flex;
+    gap: clamp(24px, 4vw, 60px);
+    padding-bottom: clamp(6px, 1.5vh, 16px);
+    border-bottom: 1px solid var(--line);
+}
+
+/* グラフは、カードの中で見出しや数字を除いた残りの高さいっぱいに広がる */
+.chart, .gauge, .spark { position: relative; flex: 1; min-height: 0; }
+.chart svg, .gauge svg, .spark svg { display: block; width: 100%; height: 100%; }
+.chart-empty { margin: auto; padding: 20px 0; color: var(--label); text-align: center; }
+
+/* 時間別売上 */
+.chart { margin-top: clamp(4px, 1vh, 12px); }
+.chart .grid { stroke: #e3e3e3; stroke-dasharray: 4 4; }
+.chart .axis-line { stroke: #cfcfcf; }
+.chart .axis { fill: #666; font-size: clamp(11px, 1.5vh, 15px); }
+.chart .line { fill: none; stroke: var(--line-chart); stroke-width: 2.5; stroke-linejoin: round; }
+.chart .line-dot { fill: #fff; stroke: var(--line-chart); stroke-width: 2.5; }
+
+/* 種類別売上内訳 */
+.mix { flex: 1; min-height: 0; display: flex; align-items: center; gap: clamp(16px, 2.5vw, 40px); }
+.donut { flex-shrink: 0; width: auto; height: 100%; max-width: 45%; max-height: 270px; }
+.donut .slices path { stroke: #fff; stroke-width: 3; }
+.donut-label { fill: #666; font-size: 15px; letter-spacing: .12em; }
+.donut-value { fill: var(--ink); font-size: 38px; font-weight: 300; }
+.mix-legend { flex: 1; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.mix-legend li {
+    display: flex;
+    align-items: center;
+    gap: clamp(10px, 1.2vw, 18px);
+    padding: clamp(4px, 1.3vh, 14px) 0;
+    font-size: clamp(13px, 1.8vh, 19px);
+    color: var(--ink);
+}
+.swatch { flex-shrink: 0; width: clamp(12px, 1.7vh, 18px); height: clamp(12px, 1.7vh, 18px); border-radius: 50%; }
+.mix-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mix-pct { color: #666; }
+
+/* 目標額の達成状況 */
+.gauge svg { max-height: 260px; }
+.gauge-track, .gauge-fill { fill: none; stroke-width: 22; stroke-linecap: round; }
+.gauge-track { stroke: #ececec; }
+.gauge-fill { stroke: var(--gauge); }
+.gauge-label { fill: #888; font-size: 22px; }
+.gauge-value { fill: var(--ink); font-size: 48px; font-weight: 300; }
+
+.panel-foot {
+    flex-shrink: 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    margin-top: clamp(6px, 2vh, 24px);
+    padding-top: clamp(6px, 2vh, 24px);
+    border-top: 1px solid var(--line);
+}
+.panel-foot > div + div { padding-left: clamp(12px, 1.5vw, 24px); border-left: 1px solid var(--line); }
+.panel-foot-3 { grid-template-columns: repeat(3, 1fr); }
+
+/* 売上サマリー */
+.overview-head { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.delta {
+    padding: clamp(3px, .7vh, 8px) clamp(10px, 1.1vw, 18px);
+    border-radius: 99px;
+    font-size: clamp(12px, 1.6vh, 17px);
+    white-space: nowrap;
+}
+.delta.up { background: var(--up-bg); color: var(--up); }
+.delta.down { background: var(--down-bg); color: var(--down); }
+.spark { margin-top: clamp(4px, 1vh, 12px); }
+.spark-line { fill: none; stroke: var(--accent); stroke-width: 2.5; }
+.spark-dot {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    margin: -6px 0 0 -6px;
+    border-radius: 50%;
+    background: var(--accent);
+}
+
+/* ---------- レジ：期間のタブ・販売していないとき ---------- */
+.tab:disabled { color: #c9c9c9; opacity: 1; }
+.tab-sep { flex-shrink: 0; align-self: center; width: 1px; height: 50%; margin: 0 12px; background: var(--line); }
+/* テスト・調整は、選ぶと下線がそれぞれの色になる */
+.tab-adjust.active { color: var(--ink); border-bottom-color: #78f8ff; }
+.tab-test.active { color: var(--ink); border-bottom-color: #3fa6f9; }
+
+.reg-idle {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 24px;
+    font-family: var(--font-ui);
+}
+.reg-idle .page-title { margin-bottom: 12px; color: var(--label); font-weight: 500; }
+
+/* ---------- 設定 ---------- */
+.settings { overflow-y: auto; font-family: var(--font-ui); }
+.settings-lock { display: flex; align-items: center; justify-content: center; min-height: 100%; padding: 24px; }
+.lock-card { width: min(420px, 100%); gap: 10px; padding: 40px; }
+.lock-card .panel-title { margin-bottom: 12px; }
+
+.settings-body { padding: 32px 24px 40px; }
+.settings-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin: 0 16px 24px; }
+.settings-actions { display: flex; align-items: center; gap: 10px; }
+.settings-msg { color: var(--label); font-size: 14px; }
+.notice { margin: 0 16px 20px; padding: 12px 16px; background: var(--watch-bg); color: var(--watch-text); }
+
+.settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 40px; align-items: start; }
+.settings-grid .panel { padding: 36px 40px; gap: 14px; }
+.settings-grid .panel-title { margin-bottom: 0; font-size: 22px; }
+
+.edit-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.edit-table th { padding: 6px; color: var(--label); font-weight: 500; text-align: left; border-bottom: 1px solid var(--line); }
+.edit-table td { padding: 6px; border-bottom: 1px solid #f0f0f0; }
+.edit-table .center { text-align: center; }
+.edit-table .muted, .muted { color: var(--label); }
+.edit-table tr.special td:first-child { padding-left: 12px; color: var(--label); }
+.edit-table input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
+.row-actions { white-space: nowrap; text-align: right; }
+
+.field {
+    width: 100%;
+    padding: 8px 10px;
+    font: inherit;
+    border: 1px solid #dcdcdc;
+    border-radius: 4px;
+    background: #fff;
+}
+.field:focus { outline: 2px solid var(--accent); border-color: transparent; }
+.field.num { text-align: right; }
+
+.icon-btn {
+    width: 30px;
+    height: 30px;
+    border: 1px solid #dcdcdc;
+    border-radius: 4px;
+    background: #fff;
+    color: #666;
+}
+.icon-btn:hover:not(:disabled) { background: #f4f4f4; }
+.icon-btn.danger:hover { background: var(--down-bg); color: var(--down); }
+
+/* ---------- 画面が小さいとき ---------- */
+/* ノートパソコンなど：サイドバーを細くして、メインの表示領域を広げる */
+@media (max-width: 1600px), (max-height: 900px) {
+    :root { --side-width: 200px; }
+    .brand { margin: 0 12px; padding: 18px 6px 10px; font-size: 19px; }
+    .side-user { gap: 10px; padding: 12px 18px; font-size: 13px; }
+    .nav { margin-top: 6px; }
+    .nav-item { gap: 16px; height: 44px; padding-left: 22px; font-size: 18px; }
+    .nav-item.active::before { width: 5px; }
+    .icon { width: 22px; height: 22px; }
+    .side-status { padding: 12px 22px; font-size: 12px; }
+}
+@media (max-width: 1400px) {
+    .settings-grid { grid-template-columns: minmax(0, 1fr); }
+}
+/* さらに狭いときだけ、ダッシュボードを 1 列にしてスクロールさせる */
+@media (max-width: 900px) {
+    .dashboard { overflow-y: auto; }
+    .dash-grid { flex: none; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-auto-rows: 420px; }
+}
 
 /* ---------- レジ画面 ---------- */
-.register {
+.register { display: flex; flex-direction: column; min-height: 0; }
+.reg-body {
+    flex: 1;
+    min-height: 0;
     display: grid;
     grid-template-rows: auto minmax(0, 1fr) auto 180px;
 }

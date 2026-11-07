@@ -1,5 +1,6 @@
-// register.js — ブラウザ版レジ画面の動き
+// register.js — ブラウザ版レジの画面切り替えとレジ画面の動き
 // 売上の計算・保存はサーバー側（register_state.py）が行い、ここでは表示と未確定の入力（ドラフト）だけを扱う。
+// ダッシュボードは dashboard.js、設定画面は settings.js。
 "use strict";
 
 const PTYPES = ["cash", "paypay"];
@@ -45,19 +46,38 @@ async function api(path, body) {
 }
 
 // ---------- 画面切り替え ----------
+const VIEWS = ["dashboard", "register", "settings"];
+
 function showView(name) {
-    for (const v of ["login", "dashboard", "register"]) $(`view-${v}`).hidden = v !== name;
-    $("statusbar").hidden = name === "login";
+    $("view-login").hidden = name !== "login";
+    $("app").hidden = name === "login";
+    for (const v of VIEWS) $(`view-${v}`).hidden = v !== name;
+    for (const b of document.querySelectorAll("[data-nav]")) {
+        b.classList.toggle("active", b.dataset.nav === name);
+    }
     ui.view = name;
+}
+
+// サイドバーの Dashboard / Register / Settings
+async function navigate(target) {
+    if (ui.view === "settings" && target !== "settings" && !(await confirmLeaveSettings())) return;
+    if (target === "dashboard") await openDashboard();
+    else if (target === "register") await openRegister();
+    else if (target === "settings") await openSettings();
 }
 
 function applyState(s) {
     ui.state = s;
-    $("status-user").textContent = `Terminal : ${s.terminal_user}`;
+    $("side-user").textContent = s.terminal_user;
+    // 販売中にほかの画面を見ていても、モバイル注文が来たことが分かるようにする
+    const pending = s.active ? s.notifications.length : 0;
+    $("nav-badge").hidden = pending === 0;
+    $("nav-badge").textContent = pending;
 }
 
 async function init() {
     bindEvents();
+    bindSettingsEvents();
     try {
         applyState(await api("/pc/api/state"));
     } catch (e) {
@@ -68,25 +88,30 @@ async function init() {
         showView("login");
         $("login-name").focus();
     } else if (ui.state.active) {
-        enterRegister();
+        enterRegister(true);
     } else {
         await openDashboard();
     }
     setInterval(poll, POLL_MS);
+    setInterval(() => ui.view === "dashboard" && refreshDashboard(), DASH_POLL_MS);
     pollConnection();
     setInterval(pollConnection, CONNECTION_POLL_MS);
 }
 
 async function poll() {
-    if (ui.view !== "register") return;
+    if (!ui.state?.logged_in) return;
     try {
         applyState(await api("/pc/api/state"));
     } catch {
         return;
     }
+    if (ui.view !== "register") return;
     if (!ui.state.active) {
-        closeModal();
-        await openDashboard();
+        // ほかの端末などで販売が終了されたとき
+        if (!$("reg-body").hidden) {
+            closeModal();
+            showRegIdle();
+        }
         return;
     }
     renderRegister();
@@ -98,10 +123,11 @@ async function pollConnection() {
     } catch {
         ui.connection = { online: false, url: null };
     }
-    $("statusbar").classList.toggle("online", ui.connection.online);
+    $("side-status").classList.toggle("online", ui.connection.online);
+    $("side-status-text").textContent = ui.connection.online ? "モバイル接続中" : "モバイル未接続";
 }
 
-// ---------- ログイン・ダッシュボード ----------
+// ---------- ログイン ----------
 async function doLogin() {
     const name = $("login-name").value.trim();
     if (!name) {
@@ -116,40 +142,104 @@ async function doLogin() {
     }
 }
 
-async function openDashboard() {
-    const data = await api("/pc/api/dashboard");
-    $("term-grid").innerHTML = data.terms.map((t) => `
-        <button class="term-btn term-${t.kind}" data-term="${esc(t.name)}" ${t.enabled ? "" : "disabled"}>
-            ${esc(t.name)}
-        </button>`).join("");
-    showView("dashboard");
+// ---------- レジ上部の期間タブ ----------
+// Register を開く。販売中ならレジ画面、そうでなければ「タブから選ぶ」案内を出す
+async function openRegister() {
+    await loadRegTerms();
+    if (ui.state.active) enterRegister();
+    else showRegIdle();
 }
 
-async function startOperation(mode) {
-    const operator = await promptModal("担当者入力", "レジ担当者の名前を入力してください");
-    if (!operator) return;
+// 期間の一覧（Settings での「レジで選択可」も含む）をサーバーから読み直す
+async function loadRegTerms() {
     try {
-        applyState(await api("/pc/api/start", { mode, operator }));
-        enterRegister();
+        ui.regTerms = (await api("/pc/api/dashboard")).terms;
+    } catch {
+        ui.regTerms = ui.regTerms || [];
+    }
+    ui.regTabsKey = "";
+    renderRegTabs();
+}
+
+function renderRegTabs() {
+    const terms = ui.regTerms || [];
+    const current = ui.state.active ? ui.state.mode : null;
+    const key = current + "|" + JSON.stringify(terms);
+    if (key === ui.regTabsKey) return;
+    ui.regTabsKey = key;
+    const tab = (t) => `
+        <button class="tab tab-${t.kind} ${t.name === current ? "active" : ""}" data-reg-term="${esc(t.name)}"
+            ${t.enabled ? "" : `disabled title="Settings で「レジで選択可」にすると選べます"`}>${esc(t.name)}</button>`;
+    const normal = terms.filter((t) => t.kind === "normal");
+    const special = terms.filter((t) => t.kind !== "normal");
+    $("reg-tabs").innerHTML = normal.map(tab).join("")
+        + (special.length ? `<span class="tab-sep"></span>${special.map(tab).join("")}` : "");
+}
+
+function showRegIdle() {
+    $("reg-idle").hidden = false;
+    $("reg-body").hidden = true;
+    renderRegTabs();
+    showView("register");
+}
+
+async function selectRegTerm(mode) {
+    const t = (ui.regTerms || []).find((x) => x.name === mode);
+    if (!t || !t.enabled) return;
+    const s = ui.state;
+    if (!s.active) {
+        await startOperation(mode);
+        return;
+    }
+    if (mode === s.mode) return;
+    // 販売中の切り替えは担当者をそのまま引き継ぐ。消えてしまう入力・注文があるときだけ確認する
+    if (draftRows().length || s.notifications.length) {
+        const ok = await confirmModal(
+            "期間の切り替え",
+            `「${s.mode}」から「${mode}」に切り替えますか？\n未確定の入力と未処理のモバイル注文は削除されます。`,
+            "切り替える", false, { showKeys: false },
+        );
+        if (!ok) return;
+    }
+    try {
+        applyState(await api("/pc/api/start", { mode, operator: s.operator }));
+        enterRegister(true);
+    } catch (e) {
+        alert(e.message);
+    }
+}
+
+// 担当者はログインした人（端末使用者）。途中で替わるときはレジ画面の「変更」から
+async function startOperation(mode) {
+    try {
+        applyState(await api("/pc/api/start", { mode, operator: ui.state.terminal_user }));
+        enterRegister(true);
     } catch (e) {
         alert(e.message);
     }
 }
 
 // ---------- レジ画面 ----------
-function enterRegister() {
-    ui.drafts = {};
-    ui.selected = -1;
+// fresh: 販売を始めたとき（またはページを開き直したとき）。ほかの画面から戻ってきただけなら、未確定の入力は残す
+function enterRegister(fresh = false) {
+    if (fresh) {
+        ui.drafts = {};
+        ui.selected = -1;
+        ui.notifCount = ui.state.notifications.length;
+        ui.knownNotifs = new Set(ui.state.notifications.map((n) => n.id));
+    }
     ui.cardsKey = "";
     ui.notifsKey = "";
-    ui.notifCount = ui.state.notifications.length;
-    ui.knownNotifs = new Set(ui.state.notifications.map((n) => n.id));
+    $("reg-idle").hidden = true;
+    $("reg-body").hidden = false;
+    if (!ui.regTerms) loadRegTerms();
     showView("register");
     renderRegister();
 }
 
 function renderRegister() {
     const s = ui.state;
+    renderRegTabs();
     $("mode-name").textContent = s.mode;
     $("mode-note").textContent = s.is_test ? "テスト：保存されません" : s.allow_negative ? "調整：マイナス入力可" : "";
     $("operator-name").textContent = s.operator;
@@ -166,13 +256,13 @@ function renderRegister() {
 async function confirmExit() {
     const ok = await confirmModal(
         "モード終了",
-        "ダッシュボードに戻りますか？\n・モバイル連携はこのモードで停止します\n・未処理のモバイル注文と未確定の入力は削除されます",
+        "販売を終了しますか？\n・モバイル連携はこのモードで停止します\n・未処理のモバイル注文と未確定の入力は削除されます",
         "終了する",
     );
     if (!ok) return;
     try {
         applyState(await api("/pc/api/exit", {}));
-        await openDashboard();
+        showRegIdle();
     } catch (e) {
         alert(e.message);
     }
@@ -447,15 +537,17 @@ function handleModalKey(e) {
     }
 }
 
-function confirmModal(title, message, okLabel, danger = false) {
+// showKeys: ボタンに Esc / Enter のキー表示を付けるか（付けなくてもキー操作は効く）
+function confirmModal(title, message, okLabel, danger = false, { showKeys = true } = {}) {
     return new Promise((resolve) => {
         const done = (v) => { closeModal(); resolve(v); };
+        const key = (k) => (showKeys ? ` <kbd>${k}</kbd>` : "");
         openModal(`
             <h2>${esc(title)}</h2>
             <p class="modal-message">${esc(message)}</p>
             <div class="modal-actions">
-                <button class="btn btn-ghost" data-modal="cancel">キャンセル <kbd>Esc</kbd></button>
-                <button class="btn ${danger ? "btn-danger" : "btn-primary"}" data-modal="ok">${esc(okLabel)} <kbd>Enter</kbd></button>
+                <button class="btn btn-ghost" data-modal="cancel">キャンセル${key("Esc")}</button>
+                <button class="btn ${danger ? "btn-danger" : "btn-primary"}" data-modal="ok">${esc(okLabel)}${key("Enter")}</button>
             </div>`, { actions: { ok: () => done(true), cancel: () => done(false) } });
     });
 }
@@ -612,7 +704,7 @@ function onKeyDown(e) {
         handleModalKey(e);
         return;
     }
-    if (ui.view !== "register") return;
+    if (ui.view !== "register" || !ui.state.active || $("reg-body").hidden) return;
     if (e.target.matches("input, textarea") || e.ctrlKey || e.altKey || e.metaKey) return;
 
     const k = e.key;
@@ -672,9 +764,19 @@ function bindEvents() {
         if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) doLogin();
     });
 
-    $("term-grid").addEventListener("click", (e) => {
-        const b = e.target.closest("[data-term]");
-        if (b && !b.disabled) startOperation(b.dataset.term);
+    document.querySelector(".nav").addEventListener("click", (e) => {
+        const b = e.target.closest("[data-nav]");
+        if (b) navigate(b.dataset.nav);
+    });
+
+    $("dash-tabs").addEventListener("click", (e) => {
+        const b = e.target.closest("[data-dash-term]");
+        if (b) selectDashTerm(b.dataset.dashTerm);
+    });
+
+    $("reg-tabs").addEventListener("click", (e) => {
+        const b = e.target.closest("[data-reg-term]");
+        if (b && !b.disabled) selectRegTerm(b.dataset.regTerm);
     });
 
     document.addEventListener("click", (e) => {

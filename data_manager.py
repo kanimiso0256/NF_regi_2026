@@ -74,6 +74,7 @@ class DataManager:
             "notify_alert": { "cash": True, "paypay": True },
             "ngrok_connect_enabled": True,
             "card_settings": {"width": 130, "height": 0, "overflow": 6},
+            "targets": {},
             "menu": [
                 {"name": "オリジナル", "price": 450, "visible": True, "mobile_visible": False, "order": 10},
             ]
