@@ -14,26 +14,23 @@ register.html と register.js は保存後にブラウザで F5 を押せば反�
 データ（system_data/）は Tkinter 版 main.py と共通。
 両方を同時に起動すると、同じファイルへの書き込みやポートが衝突するので、どちらか一方だけを使うこと。
 """
-import io
 import logging
 import os
 import sys
 import threading
+import time
 import webbrowser
 
-from flask import Flask, abort, jsonify, render_template, request, send_file
+from flask import Flask, abort, jsonify, render_template, request
 
+import analytics
 from data_manager import DataManager
 from register_state import RegisterError, RegisterState
 
-try:
-    import qrcode
-except ImportError:
-    qrcode = None
-
-# この PC からのみアクセス可能（ngrok で外部公開するのはモバイル用の 5001 番だけ）
+# この PC からのみアクセス可能
 HOST = "127.0.0.1"
 PORT = 5002
+SQUARE_SYNC_SEC = 15   # Square の会計を取り込む間隔
 
 
 def create_app(state, dev=False):
@@ -72,19 +69,58 @@ def create_app(state, dev=False):
     def get_dashboard():
         return jsonify(state.dashboard())
 
-    @app.get("/pc/api/connection")
-    def get_connection():
-        return jsonify(state.connection_status())
+    @app.get("/pc/api/analytics")
+    def get_analytics():
+        return jsonify(analytics.build(state.dm, request.args.get("term"), state.current_mode))
 
-    @app.get("/pc/qr.png")
-    def get_qr():
-        url = state.connection_status()["url"]
-        if not url or qrcode is None:
-            abort(404)
-        buf = io.BytesIO()
-        qrcode.make(url, box_size=8, border=2).save(buf)
-        buf.seek(0)
-        return send_file(buf, mimetype="image/png")
+    @app.post("/pc/api/admin/login")
+    def post_admin_login():
+        return jsonify({"token": state.admin_login(body().get("password"))})
+
+    def require_admin():
+        if not state.is_admin(request.headers.get("X-Admin-Token")):
+            abort(401)
+
+    @app.get("/pc/api/admin/settings")
+    def get_admin_settings():
+        require_admin()
+        return jsonify(state.admin_settings())
+
+    @app.post("/pc/api/admin/settings")
+    def post_admin_settings():
+        require_admin()
+        state.save_admin_settings(body())
+        return jsonify(state.admin_settings())
+
+    @app.get("/pc/api/admin/square")
+    def get_admin_square():
+        require_admin()
+        return jsonify(state.square_settings())
+
+    @app.post("/pc/api/admin/square")
+    def post_admin_square():
+        require_admin()
+        state.save_square_settings(body())
+        return jsonify(state.square_settings())
+
+    @app.post("/pc/api/admin/square/locations")
+    def post_admin_square_locations():
+        require_admin()
+        return jsonify({"locations": state.square_locations(body())})
+
+    @app.post("/pc/api/square/sync")
+    def post_square_sync():
+        state.square_sync()
+        return jsonify(state.snapshot())
+
+    @app.post("/pc/api/square/resolve")
+    def post_square_resolve():
+        return jsonify({"resolved": state.square_resolve_unmatched(body().get("term"))})
+
+    @app.get("/pc/api/square/reconcile")
+    def get_square_reconcile():
+        refresh = request.args.get("refresh") == "1"
+        return jsonify(state.square_reconcile(request.args.get("term"), refresh=refresh))
 
     @app.post("/pc/api/login")
     def post_login():
@@ -107,24 +143,9 @@ def create_app(state, dev=False):
         state.change_operator(body().get("name"))
         return jsonify(state.snapshot())
 
-    @app.post("/pc/api/toggle_mobile")
-    def post_toggle_mobile():
-        state.toggle_mobile(body().get("name"))
-        return jsonify(state.snapshot())
-
     @app.post("/pc/api/commit")
     def post_commit():
         state.commit_pc_order(body().get("drafts"))
-        return jsonify(state.snapshot())
-
-    @app.post("/pc/api/notifications/<notif_id>/approve")
-    def post_approve(notif_id):
-        state.approve_notification(notif_id)
-        return jsonify(state.snapshot())
-
-    @app.post("/pc/api/notifications/<notif_id>/cancel")
-    def post_cancel(notif_id):
-        state.cancel_notification(notif_id)
         return jsonify(state.snapshot())
 
     return app
@@ -135,7 +156,9 @@ def main():
     dm = DataManager()
     dm.log_action("System", "System", "Startup", "WebApp", "Launched")
     dev = "--dev" in sys.argv
-    app = create_app(RegisterState(dm), dev=dev)
+    state = RegisterState(dm)
+    app = create_app(state, dev=dev)
+    threading.Thread(target=square_sync_loop, args=(state,), daemon=True).start()
 
     url = f"http://{HOST}:{PORT}/"
     print(f"レジ画面: {url}  （終了するにはこのウィンドウで Ctrl+C）")
@@ -144,6 +167,16 @@ def main():
     if "--no-browser" not in sys.argv:
         threading.Timer(1.0, webbrowser.open, args=(url,)).start()
     app.run(host=HOST, port=PORT, threaded=True, use_reloader=False)
+
+
+def square_sync_loop(state):
+    # 自動取り込みがオフ・販売していないときは、Square には問い合わせずにすぐ戻る
+    while True:
+        time.sleep(SQUARE_SYNC_SEC)
+        try:
+            state.square_sync()
+        except Exception:
+            logging.exception("Square の取り込みに失敗しました")
 
 
 if __name__ == "__main__":

@@ -1,41 +1,19 @@
 # main.py
 import tkinter as tk
 from tkinter import ttk, messagebox
-from datetime import datetime
-import uuid
-from collections import defaultdict
 import platform # OS判定用
 from tkinter import simpledialog
-
-try:
-    import qrcode
-    from PIL import ImageTk
-except ImportError:
-    qrcode = None
 
 from config import COLORS, FONT_L, FONT_M, FONT_S, CARD_HEIGHT, CARD_WIDTH, FONT_NORMAL
 from data_manager import DataManager
 from gui_parts import (
-    NotificationPanel, FactoryResetWindow, MenuManager, CollapsibleControlPanel,
-    ConnectionSetting, RestoreWindow, LogViewer, NumberPad, SalesCard,
-    LoginPanel, SalesOverviewWindow, MobileSettingsWindow,
+    FactoryResetWindow, MenuManager, CollapsibleControlPanel,
+    RestoreWindow, LogViewer, NumberPad, SalesCard,
+    LoginPanel, SalesOverviewWindow,
     AdminLoginWindow, AdminPanel, OrderSummaryWindow, OperatorLoginDialog, ItemAddDialog
 )
-from mobile_server import MobileServer
 
 class App:
-
-    def stop_server_service(self):
-        """データパッキング時などにサーバーを強制停止する"""
-        try:
-            from pyngrok import ngrok
-            ngrok.kill()
-            self.mobile_server.is_host = False
-            self.mobile_server.public_url = None
-            self.check_connection_status() # 即座に反映
-        except Exception as e:
-            print(f"Server stop error: {e}")
-
 
     def is_input_active(self):
         focused = self.root.focus_get()
@@ -45,18 +23,6 @@ class App:
                 if self.current_numpad.winfo_exists(): return True
             except tk.TclError: self.current_numpad = None
         return False
-
-    def get_active_menu_status(self):
-        if not self.active_sales_mode: return []
-        res = []
-        for item in self.items:
-            if item.mobile_active:
-                res.append({"name": item.name, "price": item.price})
-        return res
-
-
-
-
 
     def open_sales_overview(self):
         SalesOverviewWindow(self.root, self.data_manager)
@@ -81,31 +47,9 @@ class App:
         AdminPanel(win, self, admin_name, self.current_user_name)
 
     def confirm_exit(self):
-        if messagebox.askokcancel("モード終了", "ダッシュボードに戻りますか？\n\n【注意】\n・モバイル連携はこのモードで停止します\n・未処理の通知は全て削除されます"):
+        if messagebox.askokcancel("モード終了", "ダッシュボードに戻りますか？\n\n【注意】\n・未確定の入力は削除されます"):
             self.show_dashboard()
 
-
-
-
-    def on_notification_action(self, act):
-        if not self.notification_panel: return
-        
-        # 'detail' アクションのハンドリングを追加
-        if act in ['approve', 'cancel', 'detail']:
-            self.notification_panel.trigger_selected_action(act)
-        
-        if act == 'approve':
-            pass
-            #self.notification_panel.remove_selected()
-        elif act == 'cancel':
-            pass
-
-    def toggle_mob_key(self, idx):
-        if self.is_input_active(): return
-        # idx 0('1') -> 0番目 ... idx 9('0') -> 9番目
-        target = idx
-        if target < len(self.items):
-            self.items[target].toggle_mobile()
 
 
 
@@ -133,145 +77,6 @@ class App:
 
 
 
-    def check_connection_status(self):
-        url = self.mobile_server.get_public_url()
-        
-        if url:
-            self.is_online = True
-            bg_col = COLORS["status_bar_online"]
-            txt = "CHANNEL OPEN"
-        else:
-            self.is_online = False
-            bg_col = COLORS["status_bar_offline"]
-            txt = "CHANNEL CLOSED"
-        
-        try:
-            self.status_bar.config(bg=bg_col)
-            self.lbl_status_text.config(text=txt, bg=bg_col)
-            # 背景色だけ更新、テキストは維持
-            self.lbl_current_user.config(bg=bg_col)
-            if self.side_panel:
-                self.side_panel.update_status(self.current_user_name, self.is_online)
-        except: pass
-            
-        self.root.after(3000, self.check_connection_status)
-
-
-  
-
-
-
-    def update_cart_monitor(self, user, items):
-        self.cart_state[user] = items
-        item_watchers = defaultdict(list)
-        for u, u_items in self.cart_state.items():
-            for i in u_items: item_watchers[i['name']].append(f"{u}:{i['amount']}")
-        if self.active_sales_mode:
-            # 個々のカードの描画負荷は SalesCard 側で軽減される
-            for card in self.items:
-                watchers = item_watchers.get(card.name, [])
-                card.update_monitor(watchers)
-            
-            # ★UX改善: 多くのウィジェット更新後、まとめて描画を処理し、ブレを軽減
-            self.root.update_idletasks() 
-
-
-
-   
-    def show_qr_code(self):
-        url = self.mobile_server.get_public_url()
-        top = tk.Toplevel(self.root)
-        top.title("モバイル接続 QRコード")
-        top.geometry("400x550") # サイズ調整
-        top.configure(bg="white")
-        
-        tk.Label(top, text="モバイル端末でアクセス", font=FONT_M, bg="white").pack(pady=(20, 10))
-
-        if not url:
-            tk.Label(top, text="⚠ チャンネルが閉鎖されているか、\nNgrok接続に失敗しています。\nモバイル設定を確認してください。", 
-                     font=FONT_S, bg="#FFEBEE", fg="red", padx=10, pady=10).pack(pady=10)
-            url_display = "接続失敗 / 待機中"
-        else:
-            try:
-                # QRコード生成と表示
-                if qrcode:
-                    img = qrcode.make(url, box_size=8, border=2)
-                    tk_img = ImageTk.PhotoImage(img)
-                    lbl_qr = tk.Label(top, image=tk_img, bg="white")
-                    lbl_qr.image = tk_img
-                    lbl_qr.pack(pady=20)
-                else:
-                     tk.Label(top, text="QRコード生成ライブラリがありません", bg="white").pack(pady=20)
-            except Exception as e:
-                tk.Label(top, text=f"QR生成エラー: {e}", bg="white").pack(pady=20)
-            
-            url_display = url
-
-        f_in = tk.Frame(top, bg="white"); f_in.pack(pady=10)
-        tk.Label(f_in, text="URL:", bg="white", font=FONT_S).pack(anchor="w")
-        self.url_var = tk.StringVar(value=url_display)
-        # Entryはreadonlyにしてユーザーがコピペできるようにする
-        tk.Entry(f_in, textvariable=self.url_var, font=("Helvetica",12), width=35, bg="#FAFAFA", state='readonly').pack()
-        
-        tk.Button(top, text="閉じる", command=top.destroy, bg=COLORS["btn_primary"], fg="white", relief="flat").pack(pady=20)
-
-
-
-
-    def reload_ngrok_connection(self):
-        """Ngrok設定変更時、またはトグル時に接続をリフレッシュする"""
-        print("Reloading Ngrok connection...")
-        self.stop_server_service()
-        # 少し待機してから再接続
-        self.root.after(1000, self._start_ngrok_after_reload)
-
-    def _start_ngrok_after_reload(self):
-        settings = self.data_manager.load_settings()
-        token = settings.get("ngrok_token", "")
-        
-        # 既存の接続エラーメッセージをクリア
-        try:
-            if self.side_panel:
-                self.side_panel.clear_ngrok_error()
-        except:
-            pass
-
-        # トグル状態を確認
-        if settings.get("ngrok_connect_enabled", True): # デフォルトはTrue
-            try:
-                self.mobile_server.set_auth_token(token)
-                self.mobile_server.start()
-                
-                # 接続確認。Ngrok接続開始後、public_urlが取れない場合は失敗と見なす
-                if not self.mobile_server.get_public_url():
-                    error_msg = "Ngrok接続に失敗しました。トークンまたは設定を確認してください。"
-                    messagebox.showerror("接続エラー", error_msg)
-                    if self.side_panel:
-                        self.side_panel.set_ngrok_error(error_msg)
-                
-                # 状態確認を再開
-                self.check_connection_status()
-            except Exception as e:
-                error_msg = f"Ngrok起動エラー: {e}"
-                messagebox.showerror("接続エラー", error_msg)
-                if self.side_panel:
-                    self.side_panel.set_ngrok_error(error_msg)
-                self.is_online = False
-        else:
-            # トグルがOFFの場合、接続をクローズした状態を維持
-            self.is_online = False
-            self.status_bar.config(bg=COLORS["status_bar_offline"])
-            self.lbl_status_text.config(text="CHANNEL CLOSED", bg=COLORS["status_bar_offline"])
-            self.lbl_current_user.config(bg=COLORS["status_bar_offline"])
-
-    def open_connection_settings(self):
-        # ★修正: Ngrok/通信設定用の新しいウィンドウを開く
-        ConnectionSetting(self.root, self.data_manager, self.current_user_name, on_save_callback=self.reload_ngrok_connection)
-
-    def open_mobile_settings(self):
-        # ★修正: MobileSettingsWindow を開き、メッセージ/パスワード/通知設定のみを扱う
-        MobileSettingsWindow(self.root, self.data_manager, self.current_user_name) 
-
 # main.py の変更・追加されたメソッドのみ記述します
 
     def show_login(self):
@@ -289,24 +94,6 @@ class App:
         self.status_bar.pack(side="top", fill="x", before=self.container)
         self.status_bar.pack_propagate(False)
         
-        self.mobile_server = MobileServer(self, self.data_manager)
-        settings = self.data_manager.load_settings()
-        
-        # トグル設定をロード
-        self.connect_enabled = settings.get("ngrok_connect_enabled", True)
-
-        if self.connect_enabled:
-            # 設定値に基づいて接続を開始
-            self.mobile_server.set_auth_token(settings.get("ngrok_token", ""))
-            self.mobile_server.start()
-            self.check_connection_status()
-        else:
-            self.is_online = False
-            self.status_bar.config(bg=COLORS["status_bar_offline"])
-            self.lbl_status_text.config(text="CHANNEL CLOSED", bg=COLORS["status_bar_offline"])
-            self.lbl_current_user.config(bg=COLORS["status_bar_offline"])
-            self.check_connection_status() # 状態確認ループは開始しておく
-
         self.show_dashboard()
 
 
@@ -338,21 +125,18 @@ class App:
     # ★変更: モード内では担当者変更ボタンを表示(show_opt_btn=True)
 # main.py
 
-    # ★変更: モバイル注文受信時の承認フローを変更
 
 # main.py
 
     # ★変更: 汎用ウィンドウへデータを渡すように修正
 
 
-    # ★変更: 通知パネルから呼ばれるが、承認時は OrderSummaryWindow (Mode=MOBILE) を開く
 
 # main.py
 
     # ★変更: ダッシュボードでも担当者変更ボタンを表示(show_opt_btn=True)
     def show_dashboard(self):
         self.active_sales_mode = False
-        self.notification_panel = None
         self.side_panel = None
         self.current_mode = None
         
@@ -360,7 +144,7 @@ class App:
         
         self.side_panel = CollapsibleControlPanel(self.container, self, show_opt_btn=True)
         self.side_panel.pack(side="left", fill="y")
-        self.side_panel.update_status(self.current_user_name, self.is_online)
+        self.side_panel.update_status(self.current_user_name)
 
         main_area = tk.Frame(self.container, bg=COLORS["bg"])
         main_area.pack(side="right", fill="both", expand=True)
@@ -394,11 +178,9 @@ class App:
             
             tk.Button(grid_f, text=t, font=FONT_M, bg=bg, fg=fg, relief="flat", width=16, height=2, state=state, command=cmd).grid(row=i//2, column=i%2, padx=10, pady=10)
 
-        self.root.unbind('<Left>'); self.root.unbind('<Right>')
-        self.root.unbind('<F1>'); self.root.unbind('<Return>')
+        self.root.unbind('<F1>'); self.root.unbind('<F2>'); self.root.unbind('<Return>')
         self.root.unbind('<Delete>'); self.root.unbind('<BackSpace>')
-        self.root.unbind('<Escape>'); self.root.unbind('<Key-space>')
-        for k in "1234567890": self.root.unbind(k)
+        self.root.unbind('<Escape>')
 
     # ★変更: レジモード以外ではアラートを出して中断
     def change_operator(self):
@@ -444,12 +226,12 @@ class App:
                     
                     display_items.append({
                         'name': item.name,
-                        'ptype': "現金" if ptype=="cash" else "PayPay",
+                        'ptype': "現金" if ptype=="cash" else "Square",
                         'qty': qty,
                         'subtotal': sub
                     })
                     
-                    ptype_jp = "現金" if ptype=="cash" else "PayPay"
+                    ptype_jp = "現金" if ptype=="cash" else "Square"
                     log_lines.append(f"・{item.name} ({ptype_jp}) x{qty:+d}")
             
             if draft['cash'] != 0 or draft['paypay'] != 0:
@@ -481,116 +263,9 @@ class App:
             # ★変更: 「完了しました」アラートは削除
             return True # 処理完了、ウィンドウを閉じる
 
-        OrderSummaryWindow(self.root, display_items, total_qty, total_yen, on_confirm, mode="PC")
+        OrderSummaryWindow(self.root, display_items, total_qty, total_yen, on_confirm)
 
 
-    def process_mobile_order_batch(self, user_name, items, ptype):
-        if not self.active_sales_mode: return
-        
-        mobile_user_label = user_name 
-        item_details = ", ".join([f"{i['name']} x{i['amount']}" for i in items])
-        
-        self.data_manager.log_action(mobile_user_label, "Mobile", "ReceiveOrder", ptype, f"From {user_name}: {item_details}")
-        
-        notif_id = str(uuid.uuid4())
-
-        def open_confirm_window():
-            display_items = []
-            total_qty = 0
-            total_yen = 0
-            
-            for order_item in items:
-                name = order_item['name']
-                qty = int(order_item['amount'])
-                
-                price = 0
-                for card in self.items:
-                    if card.name == name:
-                        price = card.price
-                        break
-                
-                sub = qty * price
-                total_qty += qty
-                total_yen += sub
-                
-                display_items.append({
-                    'name': name,
-                    'ptype': "現金" if ptype=="cash" else "PayPay",
-                    'qty': qty,
-                    'subtotal': sub
-                })
-            
-            OrderSummaryWindow(self.root, display_items, total_qty, total_yen, final_commit, mode="MOBILE", user_name=user_name)
-            return False 
-
-        def final_commit():
-            # ★変更: モバイル承認時も確認アラートを出す
-            if not messagebox.askyesno("確認", "注文を確定しますか？"):
-                return False
-
-            log_lines = []
-            ptype_jp = "現金" if ptype=="cash" else "PayPay"
-            operator_name = self.current_operator_name
-            
-            for order_item in items:
-                name = order_item['name']
-                amount = int(order_item['amount'])
-                log_lines.append(f"・{name} ({ptype_jp}) x{amount}")
-
-            # 1. 承認サマリーログ
-            log_content = "\n".join(log_lines)
-            self.data_manager.log_action(
-                operator_name, 
-                "Mobile", 
-                "CommitOrder", 
-                f"From {user_name}", 
-                f"合計 {len(items)}種\n{log_content}"
-            )
-            
-            # 2. 個別のAddログ
-            for order_item in items:
-                name = order_item['name']
-                amount = int(order_item['amount'])
-                target_card = None
-                for item in self.items:
-                    if item.name == name: target_card = item; break
-                
-                if target_card and amount > 0:
-                    target_card.update_term_count(ptype, amount, user_name=f"{operator_name} (via Mobile)")
-
-            if self.notification_panel:
-                idx = self.notification_panel.get_notification_index_by_id(notif_id)
-                if idx != -1: self.notification_panel.remove_notification(idx)
-            
-            return True
-
-        def revert_order():
-            self.root.unbind('<Return>') 
-            ans = messagebox.askyesno("注文取消し確認", f"❌ {user_name} の注文を破棄しますか？\n売上は計上されません。")
-            self.root.after(200, lambda: self.root.bind('<Return>', lambda e: self.confirm_pc_order()))
-            
-            if ans:
-                 self.data_manager.log_action(self.current_operator_name, "System", "CancelOrder", user_name, "Revert-Approved")
-                 return True
-            return False
-
-        if self.notification_panel:
-            ts = datetime.now().strftime("%H:%M:%S")
-            data = {
-                "id": notif_id,
-                "timestamp": ts,
-                "user": user_name,
-                "ptype": ptype,
-                "items": items
-            }
-            self.notification_panel.add_notification(data, on_approve=open_confirm_window, on_cancel=revert_order)
-            
-        self.update_cart_monitor(user_name, [])
-
-
-# main.py (変更メソッドのみ)
-
- 
     def load_items_and_data(self):
         for item in self.items: item.destroy()
         self.items = []
@@ -615,7 +290,6 @@ class App:
                              self.current_mode, self.allow_negative, 
                              height=self.current_card_height, width=self.current_card_width)
             
-            if item.get("mobile_visible", False): card.toggle_mobile()
             d = t_data.get(name, {'cash':0,'paypay':0})
             if self.is_test_mode: d = {'cash':0,'paypay':0}
             card.load_initial_data(d, stats[name]['cumulative'], stats[name]['total'])
@@ -671,7 +345,6 @@ class App:
         self.active_sales_mode = False
         self.current_user_name = "Unknown"
         self.current_operator_name = "Unassigned" 
-        self.is_online = False
 
         self.current_numpad = None
         self.current_card_height = 520
@@ -681,19 +354,15 @@ class App:
         self.last_win_width = 0
         self.last_win_height = 0
         
-        self.status_bar = tk.Frame(root, bg=COLORS["status_bar_offline"], height=30)
-        self.lbl_status_text = tk.Label(self.status_bar, text="OFFLINE", bg=COLORS["status_bar_offline"], fg=COLORS["status_text"], font=("Helvetica", 10, "bold"))
-        self.lbl_status_text.pack(side="right", padx=20)
-        self.lbl_current_user = tk.Label(self.status_bar, text="", bg=COLORS["status_bar_offline"], fg=COLORS["status_text"], font=("Helvetica", 10))
+        self.status_bar = tk.Frame(root, bg=COLORS["status_bar"], height=30)
+        self.lbl_current_user = tk.Label(self.status_bar, text="", bg=COLORS["status_bar"], fg=COLORS["status_text"], font=("Helvetica", 10))
         self.lbl_current_user.pack(side="left", padx=20)
 
         self.container = tk.Frame(root, bg=COLORS["bg"])
         self.container.pack(fill="both", expand=True)
         
         self.side_panel = None
-        self.notification_panel = None
         self.items = [] 
-        self.cart_state = {} 
 
         self.show_login()
 
@@ -745,9 +414,6 @@ class App:
             l = tk.Label(f, text="¥0", fg=COLORS["stat_val"], bg=COLORS["stat_panel"], font=("Helvetica", 18, "bold")); l.pack()
             self.total_labels[k] = l
             
-        self.notification_panel = NotificationPanel(parent, self.data_manager)
-        self.notification_panel.pack(side="bottom", fill="x")
-        
         wrapper = tk.Frame(parent, bg=COLORS["bg"]); wrapper.pack(side="top", fill="both", expand=True)
         self.v_center_f = tk.Frame(wrapper, bg=COLORS["bg"])
         self.v_center_f.pack(expand=True, fill="x")
@@ -858,7 +524,7 @@ class App:
         
         self.side_panel = CollapsibleControlPanel(self.container, self, show_opt_btn=True)
         self.side_panel.pack(side="left", fill="y")
-        self.side_panel.update_status(self.current_user_name, self.is_online)
+        self.side_panel.update_status(self.current_user_name)
         self.side_panel.set_operator_name(self.current_operator_name)
         
         main_area = tk.Frame(self.container, bg=COLORS["bg"])
@@ -867,23 +533,16 @@ class App:
         self.setup_operation_screen(main_area)
         self.active_sales_mode = True
         
-        self.root.bind('<Left>', lambda e: self.notification_panel.select_prev())
-        self.root.bind('<Right>', lambda e: self.notification_panel.select_next())
-        
-        self.root.bind('<Key-space>', lambda e: self.on_notification_action('approve'))
         self.root.bind('<Return>', lambda e: self.confirm_pc_order())
         
         self.root.bind('<Delete>', lambda e: self.handle_backspace())
         self.root.bind('<BackSpace>', lambda e: self.handle_backspace())
         
-        # ★変更: F1で現金へ、F2でPayPayへ一括移動（Tabは廃止）
+        # ★変更: F1で現金へ、F2でSquareへ一括移動（Tabは廃止）
         self.root.bind('<F1>', lambda e: self.move_all_drafts('cash'))
         self.root.bind('<F2>', lambda e: self.move_all_drafts('paypay'))
         
         self.root.bind('<Escape>', lambda e: self.confirm_exit())
-
-        for i, k in enumerate("1234567890"):
-            self.root.bind(k, lambda e, idx=i: self.toggle_mob_key(idx))
 
     # ★追加: 全カードのドラフトを指定の支払い方法へ移動
     def move_all_drafts(self, target_ptype):
@@ -892,21 +551,11 @@ class App:
             item.move_drafts_to(target_ptype)
         return "break"
 
-    # BackSpace/Deleteキーのハンドリング（前回と同様）
+    # BackSpace/Deleteキー: 未確定の入力をすべて取り消す
     def handle_backspace(self):
         if not self.active_sales_mode or self.is_input_active(): return
-
-        has_draft = False
         for item in self.items:
-            if item.has_drafts():
-                has_draft = True
-                break
-        
-        if has_draft:
-            for item in self.items:
-                item.clear_drafts()
-        else:
-            self.on_notification_action('cancel')
+            item.clear_drafts()
 if __name__ == "__main__":
 
 

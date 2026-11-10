@@ -10,8 +10,7 @@ COLORS = {
     "header_bg": "#37474F",      # ヘッダー背景
     
     # ステータスバー
-    "status_bar_online": "#43A047",  # オンライン時の緑帯
-    "status_bar_offline": "#78909C", # オフライン時の灰色帯
+    "status_bar": "#78909C",         # 上部の帯（端末使用者の表示）
     "status_text": "#FFFFFF",        # ステータス文字色
 
     # ログイン画面
@@ -51,21 +50,6 @@ COLORS = {
     "graph_bar_qty": "#26A69A", 
     "graph_bg": "#FAFAFA",
     "disabled": "#CFD8DC",
-
-    # 通知エリア
-    "notify_bg": "#37474F",
-    "notify_card_base": "#FFFFFF",
-    "notify_card_selected": "#FFF9C4", # 選択中の背景
-    "notify_border_base": "#90A4AE",
-    "notify_border_selected": "#FFD600", # 選択中の枠線（黄色）
-
-    # モバイル状態スイッチ
-    "mob_on_bg": "#009688", "mob_on_fg": "#FFFFFF",
-    "mob_off_bg": "#CFD8DC", "mob_off_fg": "#546E7A",
-
-    # 監視エリア
-    "monitor_active_bg": "#FFF8E1", 
-    "monitor_text": "#F57C00",
 }
 
 # フォント設定

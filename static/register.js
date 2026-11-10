@@ -1,24 +1,18 @@
-// register.js — ブラウザ版レジ画面の動き
+// register.js — ブラウザ版レジの画面切り替えとレジ画面の動き
 // 売上の計算・保存はサーバー側（register_state.py）が行い、ここでは表示と未確定の入力（ドラフト）だけを扱う。
+// ダッシュボードは dashboard.js、設定画面は settings.js。
 "use strict";
 
 const PTYPES = ["cash", "paypay"];
-const PTYPE_JP = { cash: "現金", paypay: "PayPay" };
-const MOBILE_KEYS = "1234567890";
+const PTYPE_JP = { cash: "現金", paypay: "Square" };   // キーは過去の CSV と合わせて "paypay" のまま
 const POLL_MS = 1000;
-const CONNECTION_POLL_MS = 5000;
 
 const ui = {
     view: null,
     state: null,        // サーバーから受け取った最新の状態
     drafts: {},         // 商品名 → { cash, paypay }（未確定の入力）
-    selected: -1,       // 選択中のモバイル注文
     modal: null,        // 開いているモーダル { actions, onKey }
     cardsKey: "",       // 商品の並びが変わったときだけカードを作り直すための目印
-    notifsKey: "",
-    notifCount: 0,
-    knownNotifs: new Set(),
-    connection: { online: false, url: null },
 };
 
 const $ = (id) => document.getElementById(id);
@@ -45,19 +39,34 @@ async function api(path, body) {
 }
 
 // ---------- 画面切り替え ----------
+const VIEWS = ["dashboard", "register", "settings"];
+
 function showView(name) {
-    for (const v of ["login", "dashboard", "register"]) $(`view-${v}`).hidden = v !== name;
-    $("statusbar").hidden = name === "login";
+    $("view-login").hidden = name !== "login";
+    $("app").hidden = name === "login";
+    for (const v of VIEWS) $(`view-${v}`).hidden = v !== name;
+    for (const b of document.querySelectorAll("[data-nav]")) {
+        b.classList.toggle("active", b.dataset.nav === name);
+    }
     ui.view = name;
+}
+
+// サイドバーの Dashboard / Register / Settings
+async function navigate(target) {
+    if (ui.view === "settings" && target !== "settings" && !(await confirmLeaveSettings())) return;
+    if (target === "dashboard") await openDashboard();
+    else if (target === "register") await openRegister();
+    else if (target === "settings") await openSettings();
 }
 
 function applyState(s) {
     ui.state = s;
-    $("status-user").textContent = `Terminal : ${s.terminal_user}`;
+    $("side-user").textContent = s.terminal_user;
 }
 
 async function init() {
     bindEvents();
+    bindSettingsEvents();
     try {
         applyState(await api("/pc/api/state"));
     } catch (e) {
@@ -68,40 +77,34 @@ async function init() {
         showView("login");
         $("login-name").focus();
     } else if (ui.state.active) {
-        enterRegister();
+        enterRegister(true);
     } else {
         await openDashboard();
     }
     setInterval(poll, POLL_MS);
-    pollConnection();
-    setInterval(pollConnection, CONNECTION_POLL_MS);
+    setInterval(() => ui.view === "dashboard" && refreshDashboard(), DASH_POLL_MS);
 }
 
 async function poll() {
-    if (ui.view !== "register") return;
+    if (!ui.state?.logged_in) return;
     try {
         applyState(await api("/pc/api/state"));
     } catch {
         return;
     }
+    if (ui.view !== "register") return;
     if (!ui.state.active) {
-        closeModal();
-        await openDashboard();
+        // ほかの端末などで販売が終了されたとき
+        if (!$("reg-body").hidden) {
+            closeModal();
+            showRegIdle();
+        }
         return;
     }
     renderRegister();
 }
 
-async function pollConnection() {
-    try {
-        ui.connection = await api("/pc/api/connection");
-    } catch {
-        ui.connection = { online: false, url: null };
-    }
-    $("statusbar").classList.toggle("online", ui.connection.online);
-}
-
-// ---------- ログイン・ダッシュボード ----------
+// ---------- ログイン ----------
 async function doLogin() {
     const name = $("login-name").value.trim();
     if (!name) {
@@ -116,42 +119,105 @@ async function doLogin() {
     }
 }
 
-async function openDashboard() {
-    const data = await api("/pc/api/dashboard");
-    $("term-grid").innerHTML = data.terms.map((t) => `
-        <button class="term-btn term-${t.kind}" data-term="${esc(t.name)}" ${t.enabled ? "" : "disabled"}>
-            ${esc(t.name)}
-        </button>`).join("");
-    showView("dashboard");
+// ---------- レジ上部の期間タブ ----------
+// Register を開く。販売中ならレジ画面、そうでなければ「タブから選ぶ」案内を出す
+async function openRegister() {
+    await loadRegTerms();
+    if (ui.state.active) enterRegister();
+    else showRegIdle();
 }
 
-async function startOperation(mode) {
-    const operator = await promptModal("担当者入力", "レジ担当者の名前を入力してください");
-    if (!operator) return;
+// 期間の一覧（Settings での「レジで選択可」も含む）をサーバーから読み直す
+async function loadRegTerms() {
     try {
-        applyState(await api("/pc/api/start", { mode, operator }));
-        enterRegister();
+        ui.regTerms = (await api("/pc/api/dashboard")).terms;
+    } catch {
+        ui.regTerms = ui.regTerms || [];
+    }
+    ui.regTabsKey = "";
+    renderRegTabs();
+}
+
+function renderRegTabs() {
+    const terms = ui.regTerms || [];
+    const current = ui.state.active ? ui.state.mode : null;
+    const key = current + "|" + JSON.stringify(terms);
+    if (key === ui.regTabsKey) return;
+    ui.regTabsKey = key;
+    const tab = (t) => `
+        <button class="tab tab-${t.kind} ${t.name === current ? "active" : ""}" data-reg-term="${esc(t.name)}"
+            ${t.enabled ? "" : `disabled title="Settings で「レジで選択可」にすると選べます"`}>${esc(t.name)}</button>`;
+    const normal = terms.filter((t) => t.kind === "normal");
+    const special = terms.filter((t) => t.kind !== "normal");
+    $("reg-tabs").innerHTML = normal.map(tab).join("")
+        + (special.length ? `<span class="tab-sep"></span>${special.map(tab).join("")}` : "");
+}
+
+function showRegIdle() {
+    $("reg-idle").hidden = false;
+    $("reg-body").hidden = true;
+    renderRegTabs();
+    showView("register");
+}
+
+async function selectRegTerm(mode) {
+    const t = (ui.regTerms || []).find((x) => x.name === mode);
+    if (!t || !t.enabled) return;
+    const s = ui.state;
+    if (!s.active) {
+        await startOperation(mode);
+        return;
+    }
+    if (mode === s.mode) return;
+    // 販売中の切り替えは担当者をそのまま引き継ぐ。消えてしまう入力があるときだけ確認する
+    if (draftRows().length) {
+        const ok = await confirmModal(
+            "期間の切り替え",
+            `「${s.mode}」から「${mode}」に切り替えますか？\n未確定の入力は削除されます。`,
+            "切り替える", false,
+        );
+        if (!ok) return;
+    }
+    try {
+        applyState(await api("/pc/api/start", { mode, operator: s.operator }));
+        enterRegister(true);
+    } catch (e) {
+        alert(e.message);
+    }
+}
+
+// 担当者はログインした人（端末使用者）。途中で替わるときはレジ画面の「変更」から
+async function startOperation(mode) {
+    try {
+        applyState(await api("/pc/api/start", { mode, operator: ui.state.terminal_user }));
+        enterRegister(true);
     } catch (e) {
         alert(e.message);
     }
 }
 
 // ---------- レジ画面 ----------
-function enterRegister() {
-    ui.drafts = {};
-    ui.selected = -1;
+// fresh: 販売を始めたとき（またはページを開き直したとき）。ほかの画面から戻ってきただけなら、未確定の入力は残す
+function enterRegister(fresh = false) {
+    if (fresh) {
+        ui.drafts = {};
+    }
     ui.cardsKey = "";
-    ui.notifsKey = "";
-    ui.notifCount = ui.state.notifications.length;
-    ui.knownNotifs = new Set(ui.state.notifications.map((n) => n.id));
+    $("reg-idle").hidden = true;
+    $("reg-body").hidden = false;
+    if (!ui.regTerms) loadRegTerms();
     showView("register");
     renderRegister();
+    resetRegSquare();
 }
 
 function renderRegister() {
     const s = ui.state;
+    renderRegTabs();
     $("mode-name").textContent = s.mode;
-    $("mode-note").textContent = s.is_test ? "テスト：保存されません" : s.allow_negative ? "調整：マイナス入力可" : "";
+    // 期間名（テスト・調整）はすぐ下に大きく出ているので、注意だけを短く出す
+    $("mode-note").textContent = s.is_test ? "保存されません" : s.allow_negative ? "マイナス入力可" : "";
+    $("mode-note").dataset.kind = s.is_test ? "test" : s.allow_negative ? "adjust" : "";
     $("operator-name").textContent = s.operator;
     $("total-term").textContent = yen(s.totals.term);
     $("total-cumulative").textContent = yen(s.totals.cumulative);
@@ -159,20 +225,20 @@ function renderRegister() {
     document.documentElement.style.setProperty("--card-width", `${s.card_width}px`);
     renderCards();
     updateCards();
-    renderNotifications();
     updateDraftBar();
+    onRegisterSquareState();
 }
 
 async function confirmExit() {
     const ok = await confirmModal(
         "モード終了",
-        "ダッシュボードに戻りますか？\n・モバイル連携はこのモードで停止します\n・未処理のモバイル注文と未確定の入力は削除されます",
+        "販売を終了しますか？\n未確定の入力は削除されます",
         "終了する",
     );
     if (!ok) return;
     try {
         applyState(await api("/pc/api/exit", {}));
-        await openDashboard();
+        showRegIdle();
     } catch (e) {
         alert(e.message);
     }
@@ -190,11 +256,6 @@ async function changeOperator() {
 }
 
 // ---------- 商品カード ----------
-function mobileKeyLabel(i) {
-    if (i < 9) return String(i + 1);
-    return i === 9 ? "0" : "-";
-}
-
 function renderCards() {
     const key = ui.state.mode + "\n" + ui.state.items.map((it) => it.name).join("\n");
     if (key === ui.cardsKey) return;
@@ -203,30 +264,33 @@ function renderCards() {
         || `<p class="empty">表示する商品がありません（管理者設定 → メニュー管理で登録してください）</p>`;
 }
 
-function cardHtml(it, i) {
+function cardHtml(it) {
     const k = it.keys || ["", "", "", "", "", ""];
-    const col = (ptype, [kAdd, kPad, kSub]) => `
-        <div class="pay-col pay-${ptype}">
-            <div class="pay-title">${PTYPE_JP[ptype]}</div>
-            <div class="pay-count" data-f="count-${ptype}">0</div>
-            <div class="pay-draft" data-f="draft-${ptype}"></div>
-            <button class="pay-btn pay-add" data-act="add" data-ptype="${ptype}">＋<kbd>${esc(kAdd)}</kbd></button>
-            <button class="pay-btn pay-pad" data-act="pad" data-ptype="${ptype}">⌨<kbd>${esc(kPad)}</kbd></button>
-            <button class="pay-btn pay-sub" data-act="sub" data-ptype="${ptype}">－<kbd>${esc(kSub)}</kbd></button>
+    // 支払い方法ごとに 1 段：見出しと個数、その下に －・テンキー・＋ のボタン
+    const row = (ptype, [kAdd, kPad, kSub]) => `
+        <div class="pay-row pay-${ptype}">
+            <span class="pay-title">${PTYPE_JP[ptype]}</span>
+            <span class="pay-num">
+                <span class="pay-count" data-f="count-${ptype}">0</span>
+                <span class="pay-draft" data-f="draft-${ptype}"></span>
+            </span>
+            <div class="pay-btns">
+                <button class="pay-btn pay-sub" data-act="sub" data-ptype="${ptype}">－<kbd>${esc(kSub)}</kbd></button>
+                <button class="pay-btn pay-pad" data-act="pad" data-ptype="${ptype}">⌨<kbd>${esc(kPad)}</kbd></button>
+                <button class="pay-btn pay-add" data-act="add" data-ptype="${ptype}">＋<kbd>${esc(kAdd)}</kbd></button>
+            </div>
         </div>`;
     return `
         <article class="card">
-            <button class="mob-toggle" data-act="mob">Mob <span data-f="mob">OFF</span><kbd>${mobileKeyLabel(i)}</kbd></button>
             <div class="card-head">
                 <div class="item-name" title="${esc(it.name)}">${esc(it.name)}</div>
-                <div class="item-price">@${it.price.toLocaleString()}</div>
+                <div class="item-price"><span class="yen">¥</span>${it.price.toLocaleString()}</div>
             </div>
             <div class="card-stats">
                 <div><span>Term</span><b data-f="term">¥0</b></div>
                 <div><span>総合</span><b data-f="total">¥0</b></div>
             </div>
-            <div class="pay-cols">${col("cash", k.slice(0, 3))}${col("paypay", k.slice(3, 6))}</div>
-            <div class="watchers" data-f="watchers"></div>
+            <div class="pay-rows">${row("cash", k.slice(0, 3))}${row("paypay", k.slice(3, 6))}</div>
         </article>`;
 }
 
@@ -245,21 +309,8 @@ function updateCards() {
         }
         f("term").textContent = yen((it.term.cash + it.term.paypay) * it.price);
         f("total").textContent = yen((it.total.cash + it.total.paypay) * it.price);
-        f("mob").textContent = it.mobile_active ? "ON" : "OFF";
-        f("watchers").textContent = it.watchers.length ? "🛒 " + it.watchers.join(", ") : "";
-        el.classList.toggle("mobile-on", it.mobile_active);
         el.classList.toggle("has-draft", Boolean(d.cash || d.paypay));
-        el.classList.toggle("watched", it.watchers.length > 0);
     });
-}
-
-async function toggleMobile(name) {
-    try {
-        applyState(await api("/pc/api/toggle_mobile", { name }));
-        renderRegister();
-    } catch (e) {
-        alert(e.message);
-    }
 }
 
 // ---------- 未確定の入力（ドラフト） ----------
@@ -320,94 +371,8 @@ function openPcSummary() {
         applyState(await api("/pc/api/commit", { drafts }));
         ui.drafts = {};
         renderRegister();
+        refreshRegSquare();
     });
-}
-
-// ---------- モバイル注文 ----------
-let audioCtx = null;
-function beep() {
-    try {
-        audioCtx = audioCtx || new AudioContext();
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.frequency.value = 880;
-        gain.gain.value = 0.15;
-        osc.connect(gain).connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.25);
-    } catch {
-        // 音が出せない環境では点滅だけにする
-    }
-}
-
-function renderNotifications() {
-    const list = ui.state.notifications;
-    const fresh = list.filter((n) => !ui.knownNotifs.has(n.id));
-    fresh.forEach((n) => ui.knownNotifs.add(n.id));
-
-    // 最新の注文を選んでいた（または未選択）なら、新着に選択を移す
-    const wasAtEnd = ui.selected === -1 || ui.selected >= ui.notifCount - 1;
-    if (fresh.length && wasAtEnd) ui.selected = list.length - 1;
-    if (ui.selected >= list.length) ui.selected = list.length - 1;
-    ui.notifCount = list.length;
-
-    const key = list.map((n) => n.id).join(",") + "|" + ui.selected;
-    if (key !== ui.notifsKey) {
-        ui.notifsKey = key;
-        $("notify-list").innerHTML = list.map(notifHtml).join("")
-            || `<p class="notif-empty">モバイルからの注文はまだありません</p>`;
-        $("notify-list").children[ui.selected]?.scrollIntoView({ block: "nearest", inline: "nearest" });
-    }
-
-    const alerting = fresh.filter((n) => ui.state.notify_alert[n.ptype]);
-    if (alerting.length) {
-        beep();
-        for (const n of alerting) {
-            $("notify-list").children[list.indexOf(n)]?.classList.add("flash");
-        }
-    }
-}
-
-function notifHtml(n, i) {
-    const qty = n.items.reduce((a, it) => a + it.amount, 0);
-    const sum = n.items.reduce((a, it) => a + it.subtotal, 0);
-    const text = n.items.map((it) => `${it.name}×${it.amount}`).join(", ");
-    return `
-        <div class="notif ${i === ui.selected ? "selected" : ""}" data-idx="${i}">
-            <div class="notif-top"><b>${esc(n.user)}</b><time>${esc(n.timestamp)}</time></div>
-            <div class="notif-type notif-${esc(n.ptype)}">${esc(PTYPE_JP[n.ptype] || n.ptype)}・${qty}点 ${yen(sum)}</div>
-            <div class="notif-items" title="${esc(text)}">${esc(text)}</div>
-            <div class="notif-actions">
-                <button class="btn btn-small btn-ok" data-nact="approve">承認</button>
-                <button class="btn btn-small btn-ng" data-nact="cancel">取消</button>
-            </div>
-        </div>`;
-}
-
-function selectNotification(i) {
-    const len = ui.state.notifications.length;
-    if (!len) return;
-    ui.selected = Math.max(0, Math.min(len - 1, i));
-    renderNotifications();
-}
-
-function approveNotification(n) {
-    const rows = n.items.map((it) => ({ name: it.name, ptype: n.ptype, qty: it.amount, subtotal: it.subtotal }));
-    summaryModal("モバイル注文の承認", `${n.user} さんからの注文`, rows, async () => {
-        applyState(await api(`/pc/api/notifications/${encodeURIComponent(n.id)}/approve`, {}));
-        renderRegister();
-    });
-}
-
-async function cancelNotification(n) {
-    const ok = await confirmModal("注文取消し確認", `${n.user} さんの注文を破棄しますか？\n売上は計上されません。`, "破棄する", true);
-    if (!ok) return;
-    try {
-        applyState(await api(`/pc/api/notifications/${encodeURIComponent(n.id)}/cancel`, {}));
-        renderRegister();
-    } catch (e) {
-        alert(e.message);
-    }
 }
 
 // ---------- モーダル ----------
@@ -447,6 +412,7 @@ function handleModalKey(e) {
     }
 }
 
+// ボタンにキーの表示は付けないが、Enter で OK・Esc でキャンセルが効く
 function confirmModal(title, message, okLabel, danger = false) {
     return new Promise((resolve) => {
         const done = (v) => { closeModal(); resolve(v); };
@@ -454,8 +420,8 @@ function confirmModal(title, message, okLabel, danger = false) {
             <h2>${esc(title)}</h2>
             <p class="modal-message">${esc(message)}</p>
             <div class="modal-actions">
-                <button class="btn btn-ghost" data-modal="cancel">キャンセル <kbd>Esc</kbd></button>
-                <button class="btn ${danger ? "btn-danger" : "btn-primary"}" data-modal="ok">${esc(okLabel)} <kbd>Enter</kbd></button>
+                <button class="btn btn-ghost" data-modal="cancel">キャンセル</button>
+                <button class="btn ${danger ? "btn-danger" : "btn-primary"}" data-modal="ok">${esc(okLabel)}</button>
             </div>`, { actions: { ok: () => done(true), cancel: () => done(false) } });
     });
 }
@@ -468,8 +434,8 @@ function promptModal(title, message) {
             <input class="input" data-f="input" autocomplete="off">
             <p class="error" data-f="error"></p>
             <div class="modal-actions">
-                <button class="btn btn-ghost" data-modal="cancel">キャンセル <kbd>Esc</kbd></button>
-                <button class="btn btn-primary" data-modal="ok">OK <kbd>Enter</kbd></button>
+                <button class="btn btn-ghost" data-modal="cancel">キャンセル</button>
+                <button class="btn btn-primary" data-modal="ok">OK</button>
             </div>`, {
             actions: {
                 ok: () => {
@@ -509,8 +475,8 @@ function summaryModal(title, subtitle, rows, onConfirm) {
         <div class="summary-total"><span>合計 ${qty}点</span><strong>${yen(sum)}</strong></div>
         <p class="error" data-f="error"></p>
         <div class="modal-actions">
-            <button class="btn btn-ghost" data-modal="cancel">戻る <kbd>Esc</kbd></button>
-            <button class="btn btn-primary" data-modal="ok">確定 <kbd>Enter</kbd></button>
+            <button class="btn btn-ghost" data-modal="cancel">戻る</button>
+            <button class="btn btn-primary" data-modal="ok">確定</button>
         </div>`, {
         actions: {
             ok: async () => {
@@ -558,8 +524,8 @@ function openNumpad(it, ptype) {
             ${keys.map((k) => `<button class="numpad-key" data-modal="press" data-key="${k}">${k}</button>`).join("")}
         </div>
         <div class="modal-actions">
-            <button class="btn btn-ghost" data-modal="cancel">閉じる <kbd>Esc</kbd></button>
-            <button class="btn btn-primary" data-modal="ok">追加 <kbd>Enter</kbd></button>
+            <button class="btn btn-ghost" data-modal="cancel">閉じる</button>
+            <button class="btn btn-primary" data-modal="ok">追加</button>
         </div>`, {
         actions: {
             press: (data) => press(data.key),
@@ -589,22 +555,6 @@ function openNumpad(it, ptype) {
     });
 }
 
-function openQr() {
-    const c = ui.connection;
-    const body = c.url
-        ? `<img class="qr" src="/pc/qr.png?t=${Date.now()}" alt="接続用QRコード">
-           <input class="input" readonly value="${esc(c.url)}">`
-        : `<p class="error-box">⚠ チャンネルが閉じているか、ngrok の接続に失敗しています。<br>
-           通信設定（ngrok の Authtoken）を確認してください。</p>`;
-    openModal(`
-        <h2>モバイル接続</h2>
-        <p class="modal-sub">スマホで読み取ってください</p>
-        ${body}
-        <div class="modal-actions">
-            <button class="btn btn-primary" data-modal="cancel">閉じる <kbd>Esc</kbd></button>
-        </div>`, { actions: { ok: closeModal, cancel: closeModal } });
-}
-
 // ---------- キーボード操作 ----------
 function onKeyDown(e) {
     if (e.isComposing || e.keyCode === 229) return;  // 日本語入力の変換中は無視
@@ -612,7 +562,7 @@ function onKeyDown(e) {
         handleModalKey(e);
         return;
     }
-    if (ui.view !== "register") return;
+    if (ui.view !== "register" || !ui.state.active || $("reg-body").hidden) return;
     if (e.target.matches("input, textarea") || e.ctrlKey || e.altKey || e.metaKey) return;
 
     const k = e.key;
@@ -621,25 +571,12 @@ function onKeyDown(e) {
         F1: () => moveDrafts("cash"),
         F2: () => moveDrafts("paypay"),
         Escape: confirmExit,
-        Backspace: backspace,
-        Delete: backspace,
-        ArrowLeft: () => selectNotification(ui.selected - 1),
-        ArrowRight: () => selectNotification(ui.selected + 1),
-        " ": () => {
-            const n = ui.state.notifications[ui.selected];
-            if (n) approveNotification(n);
-        },
+        Backspace: clearDrafts,
+        Delete: clearDrafts,
     };
     if (handlers[k]) {
         e.preventDefault();
         handlers[k]();
-        return;
-    }
-
-    const mobileIdx = MOBILE_KEYS.indexOf(k);
-    if (k.length === 1 && mobileIdx !== -1) {
-        const it = ui.state.items[mobileIdx];
-        if (it) toggleMobile(it.name);
         return;
     }
 
@@ -656,31 +593,38 @@ function onKeyDown(e) {
     }
 }
 
-// 未確定の入力があれば消し、なければ選択中のモバイル注文を取り消す
-function backspace() {
-    if (draftRows().length) {
-        clearDrafts();
-        return;
-    }
-    const n = ui.state.notifications[ui.selected];
-    if (n) cancelNotification(n);
-}
-
 function bindEvents() {
     $("login-btn").addEventListener("click", doLogin);
     $("login-name").addEventListener("keydown", (e) => {
         if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) doLogin();
     });
 
-    $("term-grid").addEventListener("click", (e) => {
-        const b = e.target.closest("[data-term]");
-        if (b && !b.disabled) startOperation(b.dataset.term);
+    document.querySelector(".nav").addEventListener("click", (e) => {
+        const b = e.target.closest("[data-nav]");
+        if (b) navigate(b.dataset.nav);
+    });
+
+    $("dash-tabs").addEventListener("click", (e) => {
+        const b = e.target.closest("[data-dash-term]");
+        if (b) selectDashTerm(b.dataset.dashTerm);
+    });
+
+    $("reg-tabs").addEventListener("click", (e) => {
+        const b = e.target.closest("[data-reg-term]");
+        if (b && !b.disabled) selectRegTerm(b.dataset.regTerm);
     });
 
     document.addEventListener("click", (e) => {
         const b = e.target.closest("[data-action]");
         if (!b) return;
-        const actions = { exit: confirmExit, "change-operator": changeOperator, commit: openPcSummary, qr: openQr };
+        const actions = {
+            exit: confirmExit,
+            "change-operator": changeOperator,
+            commit: openPcSummary,
+            "square-check": squareCheckClicked,
+            "square-retry": squareRetryClicked,
+            "square-unmatched": () => openUnmatched(),
+        };
         actions[b.dataset.action]?.();
     });
 
@@ -694,19 +638,6 @@ function bindEvents() {
         if (b.dataset.act === "add") addDraft(it.name, p, 1);
         else if (b.dataset.act === "sub") addDraft(it.name, p, -1);
         else if (b.dataset.act === "pad") openNumpad(it, p);
-        else if (b.dataset.act === "mob") toggleMobile(it.name);
-    });
-
-    $("notify-list").addEventListener("click", (e) => {
-        const el = e.target.closest(".notif");
-        if (!el) return;
-        const idx = Number(el.dataset.idx);
-        const n = ui.state.notifications[idx];
-        if (!n) return;
-        const act = e.target.closest("[data-nact]")?.dataset.nact;
-        if (act === "approve") approveNotification(n);
-        else if (act === "cancel") cancelNotification(n);
-        else selectNotification(idx);
     });
 
     $("modal-body").addEventListener("click", (e) => {
