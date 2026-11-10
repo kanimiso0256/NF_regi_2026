@@ -24,9 +24,6 @@
 
     --draft-pos: #1976d2;
     --draft-neg: #d32f2f;
-    --online: #43a047;
-    --offline: #78909c;
-    --mob-on: #009688;
     --watch-bg: #fff8e1;
     --watch-text: #ef6c00;
 
@@ -53,6 +50,7 @@
     --up-bg: #e6f7ed;
     --down: #dc2626;
     --down-bg: #fdecec;
+    --dash-row-min: 300px;   /* ダッシュボードのパネル 1 段の最低の高さ */
 }
 
 /* ---------- 基本 ---------- */
@@ -94,8 +92,6 @@ kbd {
 .btn:active:not(:disabled) { transform: translateY(1px); }
 .btn-primary { background: var(--primary); color: #fff; }
 .btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
-.btn-dark { background: rgba(255, 255, 255, .12); color: #fff; }
-.btn-dark:hover { background: rgba(255, 255, 255, .22); }
 .btn-ghost { background: transparent; border: 1px solid #b0bec5; }
 .btn-ghost:hover { background: rgba(0, 0, 0, .04); }
 .btn-danger { background: var(--danger); color: #fff; }
@@ -118,13 +114,11 @@ kbd {
 
 /* ---------- 数字（金額・個数） ----------
    1秒ごとに書き換わるので、数字の幅をそろえて桁が左右にガタつかないようにする */
-.total strong,
 .item-price,
 .card-stats b,
 .pay-count,
 .pay-draft,
 #draft-summary,
-.notif-type,
 .summary .num,
 .summary-total,
 .numpad-head small,
@@ -134,7 +128,6 @@ kbd {
 .mix-pct,
 .delta,
 .field.num,
-.nav-badge,
 .chart .axis,
 .donut-value,
 .gauge-value {
@@ -267,36 +260,6 @@ kbd {
     width: 8px;
     background: var(--accent);
 }
-.nav-badge {
-    min-width: 24px;
-    margin-left: auto;
-    margin-right: 16px;
-    padding: 1px 7px;
-    border-radius: 99px;
-    background: var(--highlight);
-    color: #000;
-    font-size: 14px;
-    font-weight: 700;
-    text-align: center;
-}
-
-.side-status {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-top: auto;
-    padding: 16px 34px;
-    border: none;
-    border-top: 1px solid var(--side-line);
-    background: transparent;
-    color: rgba(255, 255, 255, .75);
-    font-size: 13px;
-    text-align: left;
-}
-.side-status:hover { background: rgba(255, 255, 255, .08); }
-.status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--offline); }
-.side-status.online .status-dot { background: var(--online); box-shadow: 0 0 0 3px rgba(67, 160, 71, .35); }
-
 .main { flex: 1; min-width: 0; display: flex; background: var(--page-bg); }
 .view { flex: 1; min-width: 0; }
 
@@ -316,7 +279,7 @@ kbd {
 /* ---------- ダッシュボード ----------
    4つのカードがスクロールせずに 1 画面に収まるよう、文字やグラフの大きさを画面の高さ（vh）に合わせて伸縮させる。
    clamp(最小, 画面に合わせた値, 最大) の「最大」が大きい画面（写真のデザイン）での大きさ。 */
-.dashboard { display: flex; flex-direction: column; min-height: 0; overflow: hidden; font-family: var(--font-ui); }
+.dashboard { display: flex; flex-direction: column; min-height: 0; overflow-x: hidden; overflow-y: auto; font-family: var(--font-ui); }
 
 /* 期間のタブ（ダッシュボードとレジで共通） */
 .tabs {
@@ -342,13 +305,15 @@ kbd {
 .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 .tab-empty { padding: 24px 0; color: var(--label); }
 
+/* 画面が十分に高いときは 2 段で画面いっぱいに広がる。
+   低い画面（ノートパソコンなど）では、グラフが潰れないよう 1 段の高さを保ち、ダッシュボードをスクロールさせる */
 .dash-grid {
-    flex: 1;
-    min-height: 0;
+    flex: 1 0 0;
+    min-height: calc(var(--dash-row-min) * 2 + 80px);   /* 2 段 ＋ 段の間と上下の余白 */
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(0, .72fr);
     grid-template-rows: repeat(2, minmax(0, 1fr));
-    gap: clamp(10px, 2vh, 22px) clamp(12px, 2.2vw, 40px);
+    gap: clamp(10px, 2vh, 22px) clamp(12px, 1.6vw, 28px);
     padding: clamp(10px, 3vh, 34px) clamp(12px, 1.5vw, 24px) clamp(10px, 2vh, 24px);
 }
 .panel {
@@ -361,6 +326,7 @@ kbd {
     border-radius: var(--panel-radius);
 }
 .dash-grid .panel { overflow: hidden; }
+.dash-grid .sq-panel { grid-column: 3; grid-row: 1 / 3; }   /* Square の列は右端に 2 段分の高さで */
 .dashboard .eyebrow { margin-bottom: clamp(2px, .7vh, 8px); font-size: clamp(10px, 1.3vh, 14px); }
 .dashboard .panel-title { flex-shrink: 0; margin-bottom: clamp(6px, 2vh, 24px); font-size: clamp(16px, 2.6vh, 28px); }
 
@@ -383,6 +349,19 @@ kbd {
 .chart, .gauge, .spark { position: relative; flex: 1; min-height: 0; }
 .chart svg, .gauge svg, .spark svg { display: block; width: 100%; height: 100%; }
 .chart-empty { margin: auto; padding: 20px 0; color: var(--label); text-align: center; }
+/* 推移のグラフが入る場所が狭くても、案内の文字が下の数字にはみ出さないようにする */
+.spark { min-height: 36px; }
+.spark .chart-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    font-size: clamp(12px, 1.6vh, 16px);
+}
 
 /* 時間別売上 */
 .chart { margin-top: clamp(4px, 1vh, 12px); }
@@ -393,23 +372,37 @@ kbd {
 .chart .line-dot { fill: #fff; stroke: var(--line-chart); stroke-width: 2.5; }
 
 /* 種類別売上内訳 */
-.mix { flex: 1; min-height: 0; display: flex; align-items: center; gap: clamp(16px, 2.5vw, 40px); }
-.donut { flex-shrink: 0; width: auto; height: 100%; max-width: 45%; max-height: 270px; }
+/* 支払い方法の内訳（右の細い列）は、ドーナツの下に凡例を縦に並べる */
+.mix, .paymix { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: clamp(6px, 1.2vh, 14px); }
+.donut { flex: 1; min-height: 0; width: auto; max-width: 100%; max-height: 200px; }
+/* 種類別売上内訳は凡例を 2 列にして、その分ドーナツを大きくする */
+.mix .donut { max-height: 240px; }
+.mix .mix-legend { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: clamp(8px, .8vw, 20px); }
+.mix .mix-legend li { gap: 4px; font-size: clamp(12px, 1.5vh, 15px); }
+.mix .mix-legend .swatch { width: 10px; height: 10px; }
+.mix .mix-legend .mix-pct { font-size: .85em; }
+.mix .mix-legend .mix-name { white-space: normal; line-height: 1.25; }   /* 長い商品名は省略せず 2 行に */
 .donut .slices path { stroke: #fff; stroke-width: 3; }
 .donut-label { fill: #666; font-size: 15px; letter-spacing: .12em; }
 .donut-value { fill: var(--ink); font-size: 38px; font-weight: 300; }
-.mix-legend { flex: 1; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.mix-legend { flex: none; width: 100%; margin: 0; padding: 0; list-style: none; }
 .mix-legend li {
     display: flex;
     align-items: center;
-    gap: clamp(10px, 1.2vw, 18px);
-    padding: clamp(4px, 1.3vh, 14px) 0;
-    font-size: clamp(13px, 1.8vh, 19px);
+    gap: 8px;
+    padding: clamp(1px, .45vh, 5px) 0;
+    font-size: clamp(12px, 1.6vh, 16px);
     color: var(--ink);
 }
 .swatch { flex-shrink: 0; width: clamp(12px, 1.7vh, 18px); height: clamp(12px, 1.7vh, 18px); border-radius: 50%; }
 .mix-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mix-pct { color: #666; }
+
+/* 支払い方法の内訳 */
+.paymix-amount { color: var(--ink); font-variant-numeric: tabular-nums; }
+.paymix-legend .mix-pct { width: 4.2em; text-align: right; font-variant-numeric: tabular-nums; }
+.paymix-note { flex-shrink: 0; margin: clamp(4px, 1vh, 10px) 0 0; color: var(--label); font-size: 12px; }
+.paymix-note:empty { display: none; }
 
 /* 目標額の達成状況 */
 .gauge svg { max-height: 260px; }
@@ -517,6 +510,68 @@ kbd {
 .icon-btn:hover:not(:disabled) { background: #f4f4f4; }
 .icon-btn.danger:hover { background: var(--down-bg); color: var(--down); }
 
+/* ---------- Square 照合（ダッシュボード）・Square 連携（設定） ---------- */
+/* ダッシュボード右端の縦長の列：上に照合、下に支払い方法の内訳 */
+.sq-panel-head { flex-shrink: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.sq-panel-head .btn { flex-shrink: 0; }
+.sq-panel-body { flex-shrink: 0; display: flex; flex-direction: column; gap: clamp(6px, 1.2vh, 12px); transition: opacity .15s; }
+.sq-panel-body.loading { opacity: .45; }
+.sq-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(6px, 1.2vh, 14px) 16px; }
+.sq-kpis .kpi-label { white-space: nowrap; }
+.sq-days { width: 100%; border-collapse: collapse; font-size: 12px; }
+.sq-days th { padding: 2px 4px; color: var(--label); font-weight: 500; text-align: right; }
+.sq-days td { padding: 2px 4px; text-align: right; border-top: 1px solid #f0f0f0; font-variant-numeric: tabular-nums; }
+.sq-days th:first-child, .sq-days td:first-child { text-align: left; }
+.sq-days .up { color: var(--up); }
+.sq-days .down { color: var(--down); }
+.sq-foot { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.sq-sub-title {
+    flex-shrink: 0;
+    margin: clamp(10px, 2vh, 22px) 0 clamp(6px, 1.2vh, 12px);
+    padding-top: clamp(10px, 2vh, 22px);
+    border-top: 1px solid var(--line);
+    color: var(--ink);
+    font-size: clamp(14px, 2vh, 18px);
+    font-weight: 700;
+}
+.sq-note, .sq-meta, .sq-error { margin: 0; font-size: 13px; }
+.sq-unmatched-btn { background: var(--down-bg); color: var(--down); border: 1px solid var(--down); }
+.sq-note, .sq-meta { color: var(--label); }
+.sq-error { color: var(--down); }
+
+.sq-settings { grid-column: 1 / -1; max-width: 760px; }
+.sq-help { margin: 0; font-size: 13px; line-height: 1.7; }
+.sq-field { display: block; }
+.sq-field .kpi-label { font-size: 13px; }
+.sq-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.sq-check-field { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; background: #f6f8f9; border-radius: 4px; font-size: 14px; }
+.sq-check-field input { flex-shrink: 0; width: 18px; height: 18px; margin-top: 2px; accent-color: var(--accent); }
+.sq-check-field strong { display: block; margin-bottom: 4px; color: var(--ink); font-weight: 500; }
+.sq-check-field .muted { display: block; font-size: 13px; line-height: 1.7; }
+.sq-check-field b { color: var(--ink); font-weight: 500; }
+
+/* 画面下に数秒だけ出るお知らせ（Square から取り込んだときなど） */
+.toast {
+    position: fixed;
+    left: 50%;
+    bottom: 96px;
+    z-index: 50;
+    transform: translateX(-50%);
+    padding: 12px 22px;
+    border-radius: 99px;
+    background: var(--dark);
+    color: #fff;
+    font-family: var(--font-ui);
+    font-size: 15px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, .18);
+    animation: toast-in .2s ease-out;
+    transition: opacity .35s;
+}
+.toast.hide { opacity: 0; }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } }
+.sq-clear { margin-left: auto; color: var(--down); border-color: var(--down); }
+.sq-msg:empty { display: none; }
+
 /* ---------- 画面が小さいとき ---------- */
 /* ノートパソコンなど：サイドバーを細くして、メインの表示領域を広げる */
 @media (max-width: 1600px), (max-height: 900px) {
@@ -527,7 +582,6 @@ kbd {
     .nav-item { gap: 16px; height: 44px; padding-left: 22px; font-size: 18px; }
     .nav-item.active::before { width: 5px; }
     .icon { width: 22px; height: 22px; }
-    .side-status { padding: 12px 22px; font-size: 12px; }
 }
 @media (max-width: 1400px) {
     .settings-grid { grid-template-columns: minmax(0, 1fr); }
@@ -536,211 +590,169 @@ kbd {
 @media (max-width: 900px) {
     .dashboard { overflow-y: auto; }
     .dash-grid { flex: none; grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-auto-rows: 420px; }
+    .dash-grid .sq-panel { grid-column: auto; grid-row: auto; }
 }
 
-/* ---------- レジ画面 ---------- */
-.register { display: flex; flex-direction: column; min-height: 0; }
+/* ---------- レジ画面 ----------
+   ダッシュボードと同じく、灰色の背景に白いパネルを並べる。
+   上から「期間名と金額の帯」「商品」「未確定バー」 */
+.register { display: flex; flex-direction: column; min-height: 0; font-family: var(--font-ui); }
 .reg-body {
     flex: 1;
     min-height: 0;
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr) auto 180px;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: clamp(8px, 1.6vh, 16px);
+    padding: clamp(8px, 1.6vh, 16px) clamp(12px, 1.5vw, 20px);
 }
 
-.reg-header {
+/* 上の帯 */
+.reg-head {
     display: flex;
+    flex-direction: row;   /* .panel は縦並びなので横並びに戻す */
     flex-wrap: wrap;
     align-items: center;
-    gap: 16px;
-    padding: 10px 20px;
-    background: var(--dark-2);
-    color: #fff;
+    gap: 12px 24px;
+    padding: clamp(8px, 1.4vh, 14px) 24px;
 }
-.mode-name { font-size: 20px; font-weight: 700; }
+.reg-head .eyebrow { margin: 0; font-size: 11px; }
+.reg-eyebrow-row { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+.reg-head .page-title { font-size: clamp(17px, 2.4vh, 22px); white-space: nowrap; }
+/* テスト・調整のときの注意（小見出しの横の小さな札）。色は上のタブの下線の色に合わせた淡い色 */
 .mode-note {
-    padding: 2px 10px;
-    border-radius: 99px;
-    background: var(--highlight);
-    color: #000;
-    font-size: 12px;
-    font-weight: 600;
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 16px;
+    white-space: nowrap;
 }
+.mode-note[data-kind="test"] { color: #1769b0; }
+.mode-note[data-kind="adjust"] { color: #0b7680; }
 .mode-note:empty { display: none; }
-.totals { display: flex; gap: 10px; margin-left: auto; }
-.total {
-    min-width: 120px;
-    padding: 4px 14px;
-    text-align: center;
-    border-radius: 5px;
-    background: rgba(0, 0, 0, .2);
+.totals { display: flex; margin-left: auto; }
+.total { min-width: 130px; padding: 0 20px; border-left: 1px solid var(--line); }
+.total .kpi-label { margin-bottom: 0; font-size: 12px; }
+.total .kpi { font-size: clamp(20px, 3vh, 28px); }
+/* レジ上部の Square 欄。取り込めなかった会計があるとき・エラーのときだけ押せる（一覧を開く・再試行） */
+.sq-check {
+    margin: 0;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    background: transparent;
+    border: none;
+    border-left: 1px solid var(--line);
+    cursor: default;
 }
-.total span { display: block; font-size: 11px; color: #b0bec5; }
-.total strong { font-size: 20px; color: #ffffff; }
-.operator { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.sq-check.actionable { cursor: pointer; }
+.sq-check.actionable:hover { background: rgba(0, 0, 0, .03); }
+.sq-diff { display: block; color: var(--label); font-size: 11px; white-space: nowrap; }
+.sq-diff.ok { color: var(--up); }
+.sq-diff.ng { color: var(--down); font-weight: 500; }
+.operator { display: flex; align-items: center; gap: 8px; color: var(--label); font-size: 13px; }
+.operator strong { color: var(--ink); font-weight: 500; }
+.reg-head .btn-ghost { border-color: #d6d6d6; border-radius: 4px; font-weight: 500; }
+.reg-head .btn-ghost { padding: 6px 14px; font-size: 13px; }
+.reg-head .btn-small { padding: 3px 10px; font-size: 12px; }
 
-/* ---------- 商品カード ---------- */
+/* ---------- 商品 ---------- */
+.products { display: flex; flex-direction: column; min-height: 0; padding: clamp(8px, 1.4vh, 16px) 24px clamp(8px, 1.4vh, 16px); }
+.products > .eyebrow { margin-bottom: clamp(4px, .8vh, 10px); font-size: 11px; }
 .cards {
+    flex: 1;
+    min-height: 0;
     display: flex;
     align-items: stretch;
-    gap: 12px;
-    padding: 16px 20px;
     overflow-x: auto;
+    border-top: 1px solid var(--line);
 }
+/* カードは枠を付けず、区切り線で並べる。幅は設定の「横幅」と 190px の大きい方 */
 .card {
-    flex: 0 0 var(--card-width);
-    min-width: 140px;
+    flex: 0 0 max(var(--card-width), 190px);
     display: flex;
     flex-direction: column;
-    overflow: hidden;
-    background: var(--surface);
-    border: 2px solid transparent;
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
+    min-height: 0;
+    padding: clamp(6px, 1.2vh, 12px) 14px;
+    border-right: 1px solid var(--line);
 }
-.card.has-draft { border-color: var(--draft-pos); }
+.card.has-draft { box-shadow: inset 0 3px 0 var(--accent); }
 
-.mob-toggle {
-    padding: 6px;
-    border: none;
-    background: #cfd8dc;
-    color: #546e7a;
-    font-size: 12px;
-    font-weight: 700;
-}
-.card.mobile-on .mob-toggle { background: var(--mob-on); color: #fff; }
-
-.card-head { padding: 8px 8px 4px; text-align: center; }
+.card-head { margin: 0 0 clamp(4px, .8vh, 8px); }
 .item-name {
+    color: var(--ink);
     font-size: 15px;
     font-weight: 700;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.item-price { font-size: 12px; color: var(--text-sub); }
+/* 価格は名前の下に大きく（会計中に金額を確かめやすいように） */
+.item-price { margin-top: 2px; color: var(--ink); font-size: clamp(18px, 2.6vh, 22px); font-weight: 300; line-height: 1.15; }
+.item-price .yen { margin-right: 1px; color: var(--label); font-size: .64em; }
 
 .card-stats {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    padding: 0 6px 8px;
-    text-align: center;
-    font-size: 12px;
+    padding-bottom: clamp(4px, .8vh, 10px);
+    border-bottom: 1px solid var(--line);
+    font-size: 13px;
 }
-.card-stats span { display: block; font-size: 10px; font-weight: 700; color: #999; }
+.card-stats span { display: block; color: var(--label); font-size: 10px; }
+.card-stats b { color: var(--ink); font-weight: 500; }
 
-.pay-cols {
+/* 現金・Square の 2 段。ボタンは残りの高さいっぱいに伸びる */
+.pay-rows { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.pay-row {
     flex: 1;
     min-height: 0;
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1px;
-    background: var(--line);
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 4px 8px;
+    padding: clamp(4px, .8vh, 10px) 0;
 }
-.pay-col { display: flex; flex-direction: column; gap: 4px; min-height: 0; padding: 6px 4px; }
-.pay-cash { background: var(--cash-bg); color: var(--cash); }
-.pay-paypay { background: var(--pay-bg); color: var(--pay); }
-.pay-title { text-align: center; font-size: 11px; font-weight: 700; }
-.pay-count { text-align: center; font-size: 24px; font-weight: 800; line-height: 1.1; }
-.pay-draft {
-    align-self: center;
-    min-height: 20px;
-    padding: 0 8px;
-    border-radius: 99px;
-    color: #fff;
-    font-size: 13px;
-    font-weight: 700;
-}
-.pay-draft.pos { background: var(--draft-pos); }
-.pay-draft.neg { background: var(--draft-neg); }
+.pay-row + .pay-row { border-top: 1px dashed var(--line); }
+.pay-title { display: flex; align-items: center; gap: 6px; color: var(--label); font-size: 12px; }
+.pay-title::before { content: ""; width: 3px; height: 14px; }
+.pay-cash .pay-title::before { background: var(--cash); }
+.pay-paypay .pay-title::before { background: var(--pay); }
+.pay-num { display: flex; align-items: baseline; justify-content: flex-end; gap: 4px; }
+.pay-count { color: var(--ink); font-size: clamp(22px, 3.4vh, 30px); font-weight: 300; line-height: 1; }
+.pay-draft { font-size: 13px; font-weight: 500; }
+.pay-draft.pos { color: var(--accent); }
+.pay-draft.neg { color: var(--draft-neg); }
 
+.pay-btns { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 44px 1fr; gap: 4px; min-height: 0; }
 .pay-btn {
-    flex: 1;
-    min-height: 40px;
-    border: none;
-    border-radius: 6px;
-    color: inherit;
-    font-size: 18px;
-    font-weight: 700;
+    min-height: 36px;
+    border: 1px solid #dcdcdc;
+    border-radius: 3px;
+    background: #fff;
+    color: var(--ink);
+    font-size: 20px;
+    font-weight: 300;
+    white-space: nowrap;
 }
-.pay-btn:hover { filter: brightness(.95); }
-.pay-cash .pay-add, .pay-cash .pay-sub { background: var(--cash-btn); }
-.pay-paypay .pay-add, .pay-paypay .pay-sub { background: var(--pay-btn); }
-.pay-pad { background: rgba(255, 255, 255, .8); font-size: 15px; }
+.pay-btn:hover { background: #f6f6f6; }
+.pay-btn:active { background: #eee; }
+.pay-pad { color: #999; font-size: 13px; }
+.pay-btn kbd { margin-left: 3px; padding: 0; background: none; color: #555; }
+.pay-pad kbd { display: none; }   /* 幅が狭いのでテンキーのキー表示は隠す（title で確認できる） */
 
-.watchers { min-height: 28px; padding: 4px 8px; font-size: 12px; color: #999; }
-.card.watched .watchers { background: var(--watch-bg); color: var(--watch-text); font-weight: 600; }
-
-.empty { margin: auto; color: var(--text-sub); }
+.empty { margin: auto; color: var(--label); }
 
 /* ---------- 未確定バー ---------- */
 .draft-bar {
     display: flex;
+    flex-direction: row;
     align-items: center;
     gap: 16px;
-    padding: 10px 20px;
-    background: var(--surface);
-    border-top: 1px solid var(--line);
+    padding: clamp(6px, 1.2vh, 12px) 24px;
+    border-left: 4px solid var(--line);
 }
-.draft-bar.active { background: #e3f2fd; }
-#draft-summary { font-size: 16px; font-weight: 700; }
-.hints { margin-left: auto; color: var(--text-sub); font-size: 12px; }
-.draft-bar .btn-primary { padding: 10px 28px; font-size: 16px; }
-
-/* ---------- モバイル注文 ---------- */
-.notify-panel { display: flex; flex-direction: column; min-height: 0; background: var(--dark-2); }
-.notify-head {
-    display: flex;
-    gap: 16px;
-    padding: 6px 20px;
-    background: var(--dark);
-    color: #eceff1;
-    font-size: 13px;
-    font-weight: 700;
-}
-.notify-head .hints { margin-left: 0; color: #90a4ae; }
-.notify-list {
-    flex: 1;
-    display: flex;
-    align-items: stretch;
-    gap: 10px;
-    padding: 10px 20px;
-    overflow-x: auto;
-}
-.notif {
-    flex: 0 0 200px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 8px 10px;
-    background: #fff;
-    border: 3px solid transparent;
-    border-radius: 8px;
-    font-size: 12px;
-    cursor: pointer;
-}
-.notif.selected { border-color: #2196f3; background: #fffde7; }
-.notif.flash { animation: flash .3s 4 alternate; }
-@keyframes flash {
-    to { border-color: var(--highlight); box-shadow: 0 0 0 4px var(--highlight); }
-}
-.notif-top { display: flex; justify-content: space-between; }
-.notif-top time { color: #90a4ae; }
-.notif-type { font-weight: 700; }
-.notif-cash { color: var(--cash); }
-.notif-paypay { color: var(--pay); }
-.notif-items {
-    flex: 1;
-    overflow: hidden;
-    color: #333;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-}
-.notif-actions { display: flex; gap: 6px; }
-.notif-actions .btn { flex: 1; }
-.btn-ok { background: var(--cash-bg); color: var(--cash); }
-.btn-ng { background: var(--pay-bg); color: var(--pay); }
-.notif-empty { margin: auto; color: #90a4ae; font-size: 13px; }
+.draft-bar.active { border-left-color: var(--accent); }
+#draft-summary { color: var(--ink); font-size: 15px; font-weight: 500; }
+#commit-btn { margin-left: auto; }   /* 確定ボタンは右端に寄せる */
+.draft-bar .btn-primary { padding: 8px 28px; border-radius: 4px; font-size: 15px; font-weight: 500; }
 
 /* ---------- モーダル ---------- */
 .modal-backdrop {
@@ -776,9 +788,8 @@ kbd {
 }
 .summary td { padding: 8px 4px; border-bottom: 1px solid var(--line); }
 .summary .num { text-align: right; }
-.ptag { padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 700; }
-.ptag-cash { background: var(--cash-bg); color: var(--cash); }
-.ptag-paypay { background: var(--pay-bg); color: var(--pay); }
+/* 注文内容の確認の「支払」欄。地の色は付けず、どの支払い方法も黒の文字 */
+.ptag { color: var(--ink); font-size: 13px; }
 .summary-total {
     display: flex;
     justify-content: space-between;
@@ -818,6 +829,3 @@ kbd {
 }
 .numpad-key:hover { background: #dfe4e7; }
 
-/* QR */
-.qr { display: block; width: 260px; height: 260px; margin: 8px auto 16px; image-rendering: pixelated; }
-.error-box { padding: 12px; border-radius: 8px; background: #ffebee; color: #c62828; }

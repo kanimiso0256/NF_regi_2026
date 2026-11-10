@@ -464,188 +464,6 @@ class NumberPad(tk.Toplevel):
         self.destroy()
         self.parent.focus_set()
 
-class MobileSettingsWindow(tk.Toplevel):
-    def __init__(self, parent, data_manager, user_name): # on_save_callback を削除
-        super().__init__(parent)
-        self.dm = data_manager
-        self.user_name = user_name
-        # self.on_save_callback = on_save_callback # 削除
-        self.title("モバイル設定")
-        self.geometry("550x780") 
-        self.configure(bg="#F7F9FC") 
-        self.transient(parent); self.grab_set(); self.focus_force()
-        
-        settings = self.dm.load_settings()
-        notify_settings = settings.get("notify_alert", {"cash": False, "paypay": True}) 
-        
-        # --- スクロール設定 ---
-        canvas = tk.Canvas(self, bg="#F7F9FC", highlightthickness=0)
-        sb = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
-        inner = tk.Frame(canvas, bg="#F7F9FC", padx=30)
-        
-        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        window_id = canvas.create_window((0,0), window=inner, anchor="nw")
-        
-        def on_canvas_resize(event):
-            canvas.itemconfig(window_id, width=event.width)
-        canvas.bind("<Configure>", on_canvas_resize)
-
-        canvas.configure(yscrollcommand=sb.set)
-        canvas.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
-        
-        # ★修正: ホイールスクロール機能を追加
-        def _on_mousewheel(event):
-            if platform.system() == 'Windows':
-                canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-            elif platform.system() == 'Darwin': 
-                canvas.yview_scroll(int(-1*event.delta), "units")
-            else:
-                if event.num == 4: canvas.yview_scroll(-1, "units")
-                elif event.num == 5: canvas.yview_scroll(1, "units")
-
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
-        canvas.bind_all("<Button-4>", _on_mousewheel)
-        canvas.bind_all("<Button-5>", _on_mousewheel)
-        
-        # --- UI構築 ---
-        header = tk.Frame(inner, bg="#F7F9FC", pady=20)
-        header.pack(fill="x")
-        tk.Label(header, text="Mobile Configuration", font=("Helvetica", 18, "bold"), bg="#F7F9FC", fg="#37474F").pack(anchor="w")
-        tk.Label(header, text="モバイルオーダー端末の表示・接続・通知設定", font=("Helvetica", 10), bg="#F7F9FC", fg="#78909C").pack(anchor="w")
-
-        content = tk.Frame(inner, bg="#F7F9FC")
-        content.pack(fill="both", expand=True)
-
-        def create_section(parent_frame, title, desc):
-            f = tk.Frame(parent_frame, bg="white", padx=20, pady=20)
-            f.pack(fill="x", pady=(0, 20))
-            tk.Frame(f, bg="#E0E0E0", height=1).pack(side="bottom", fill="x")
-            head = tk.Frame(f, bg="white")
-            head.pack(fill="x", pady=(0, 15))
-            tk.Label(head, text=title, font=("Helvetica", 11, "bold"), bg="white", fg="#263238").pack(anchor="w")
-            tk.Label(head, text=desc, font=("Helvetica", 9), bg="white", fg="#90A4AE").pack(anchor="w")
-            return f
-
-        # 1. セキュリティ
-        sec_frame = create_section(content, "Authentication", "スタッフが端末でログインする際のパスワード")
-        f_inp = tk.Frame(sec_frame, bg="#FAFAFA", padx=10, pady=5, highlightbackground="#ECEFF1", highlightthickness=1)
-        f_inp.pack(fill="x")
-        tk.Label(f_inp, text="Password", bg="#FAFAFA", fg="#546E7A", font=("Helvetica", 9, "bold")).pack(side="left", padx=10)
-        self.var_pass = tk.StringVar(value=settings.get("mobile_password", "1234"))
-        tk.Entry(f_inp, textvariable=self.var_pass, font=("Helvetica", 12), width=20, bd=0, bg="#FAFAFA", justify="right").pack(side="right", padx=10)
-
-        # 2. PC通知設定
-        notif_frame = create_section(content, "PC Notification Alert", "注文受信時にPCで音と画面点滅を行うか")
-        f_sw = tk.Frame(notif_frame, bg="white")
-        f_sw.pack(fill="x")
-        
-        self.var_alert_cash = tk.BooleanVar(value=notify_settings.get("cash", False))
-        self.var_alert_paypay = tk.BooleanVar(value=notify_settings.get("paypay", True))
-        
-        def create_check(parent, text, var, color):
-            c = tk.Checkbutton(parent, text=text, variable=var, bg="white", activebackground="white", 
-                               font=("Helvetica", 10), selectcolor="white", fg=color)
-            c.pack(side="left", padx=(0, 20))
-
-        create_check(f_sw, "現金注文 (Cash Alert)", self.var_alert_cash, "#2E7D32")
-        create_check(f_sw, "PayPay注文 (PayPay Alert)", self.var_alert_paypay, "#C62828")
-
-        # 3. メッセージ設定
-        msg_frame = create_section(content, "Display Messages", "モバイル端末上部に表示するアナウンス")
-        tk.Label(msg_frame, text="Info Message (通常)", font=("Helvetica", 9, "bold"), bg="white", fg="#0288D1").pack(anchor="w", pady=(0,5))
-        self.txt_info = tk.Text(msg_frame, height=2, font=("Helvetica", 10), bg="#F1F8E9", bd=0, padx=10, pady=10)
-        self.txt_info.pack(fill="x", pady=(0, 15))
-        self.txt_info.insert("1.0", settings.get("mobile_info", ""))
-
-        tk.Label(msg_frame, text="Alert Message (警告・停止中)", font=("Helvetica", 9, "bold"), bg="white", fg="#D32F2F").pack(anchor="w", pady=(0,5))
-        self.txt_alert = tk.Text(msg_frame, height=2, font=("Helvetica", 10), bg="#FFEBEE", bd=0, padx=10, pady=10)
-        self.txt_alert.pack(fill="x")
-        self.txt_alert.insert("1.0", settings.get("mobile_alert", ""))
-
-        # ----------------------------------------------------
-        # ★修正: 保存ボタンをスクロールコンテンツの最下部に配置
-        # ----------------------------------------------------
-        # footer の親を inner (スクロール可能なフレーム) に変更
-        footer = tk.Frame(inner, bg="#F7F9FC", pady=20) 
-        # footer を inner の中に fill="x" で配置
-        footer.pack(fill="x") 
-        
-        # ダミーフレームを置いて、上部ボタンとは分離させる (innerの中)
-        tk.Frame(inner, height=10, bg="#F7F9FC").pack(fill="x") 
-
-        # 「設定を保存 (Save)」
-        tk.Button(footer, text="設定を保存", bg=COLORS["btn_success"], fg="white", font=("Helvetica", 10, "bold"), 
-                  relief="flat", height=2, cursor="hand2", command=self.save).pack(fill="x")
-
-    def save(self):
-        # 1. メッセージ・パスワード・通知設定のみを更新（Ngrok設定は ConnectionSetting で処理される想定）
-        self.dm.update_mobile_messages(self.txt_info.get("1.0", "end").strip(), self.txt_alert.get("1.0", "end").strip())
-        self.dm.update_mobile_password(self.var_pass.get().strip())
-        self.dm.update_notification_settings(self.var_alert_cash.get(), self.var_alert_paypay.get(), self.user_name)
-        
-        self.dm.log_action(self.user_name, "Settings", "UpdateMobileConfig", "Messages/PW/Notify", "Updated")
-        
-        messagebox.showinfo("完了", "メッセージ・パスワード・通知設定を保存しました。")
-        self.destroy()
-
-
-class ConnectionSetting(tk.Toplevel):
-    def __init__(self, parent, data_manager, user_name, on_save_callback=None):
-        super().__init__(parent)
-        self.dm = data_manager
-        self.user_name = user_name # ログ用
-        self.on_save_callback = on_save_callback
-        self.title("通信設定 (Ngrok)")
-        self.geometry("500x350")
-        self.configure(bg=COLORS["bg"])
-        self.transient(parent); self.grab_set(); self.focus_force()
-        
-        settings = self.dm.load_settings()
-        
-        tk.Label(self, text="Ngrok 通信設定", font=FONT_M, bg=COLORS["bg"]).pack(pady=10)
-        
-        # 1. トグルスイッチ
-        f_toggle = tk.Frame(self, bg=COLORS["bg"], pady=10)
-        f_toggle.pack(fill="x", padx=40)
-        tk.Label(f_toggle, text="外部接続を有効にする (ON/OFF)", bg=COLORS["bg"], fg=COLORS["text_main"], font=FONT_S).pack(side="left")
-        self.var_connect = tk.BooleanVar(value=settings.get("ngrok_connect_enabled", True))
-        tk.Checkbutton(f_toggle, variable=self.var_connect, bg=COLORS["bg"], activebackground=COLORS["bg"], selectcolor="white", 
-                       font=FONT_S, cursor="hand2").pack(side="right")
-        
-        # 2. Authtoken
-        tk.Label(self, text="Authtokenを入力してください", bg=COLORS["bg"]).pack(pady=(10, 0))
-        self.var_token = tk.StringVar(value=settings.get("ngrok_token", ""))
-        self.ent_token = tk.Entry(self, textvariable=self.var_token, width=50, font=("Helvetica", 11))
-        self.ent_token.pack(pady=10, padx=20)
-        
-        # 3. 再接続ボタン
-        tk.Button(self, text="設定を保存し、Ngrok接続を再開", bg=COLORS["btn_success"], fg="white", font=("Helvetica", 11, "bold"), 
-                  command=self.save_and_reconnect, height=2).pack(pady=20, padx=40, fill="x")
-
-    def save_and_reconnect(self):
-        """Ngrok設定を保存し、接続再開のコールバックを実行する"""
-        
-        token = self.var_token.get().strip()
-        is_enabled = self.var_connect.get()
-        
-        if is_enabled and not token:
-            messagebox.showwarning("エラー", "接続を有効にするにはNgrok Authtokenが必要です。")
-            return
-            
-        # データマネージャに保存
-        self.dm.update_ngrok_token(token)
-        self.dm.update_ngrok_connect_enabled(is_enabled, self.user_name)
-        
-        self.dm.log_action(self.user_name, "Settings", "SaveAndReconnect", "Ngrok", "Saved & Restarting")
-        
-        messagebox.showinfo("保存完了", "Ngrok設定を保存しました。接続を再試行します。")
-        self.destroy()
-        
-        if self.on_save_callback:
-            self.on_save_callback()
-
-
 class LoginPanel(tk.Frame):
     def __init__(self, parent, data_manager, callback):
         super().__init__(parent, bg="#F0F2F5")
@@ -1028,7 +846,6 @@ class MenuManager(tk.Toplevel):
             f_sw.pack(side="right")
             
             v_vis = tk.BooleanVar(value=item.get("visible", True))
-            v_mob = tk.BooleanVar(value=item.get("mobile_visible", False))
             
             def create_sw(parent, text, var, color):
                 f = tk.Frame(parent, bg="white", padx=8)
@@ -1038,12 +855,10 @@ class MenuManager(tk.Toplevel):
                 tk.Checkbutton(f, variable=var, bg="white", activebackground="white", selectcolor="white").pack()
 
             create_sw(f_sw, "PC表示", v_vis, "#4CAF50")
-            create_sw(f_sw, "Mobile", v_mob, "#2196F3")
             
             self.item_vars.append({
                 "order": v_order,
-                "vis": v_vis, 
-                "mob": v_mob
+                "vis": v_vis
             })
 
     def add_item_dialog(self):
@@ -1062,8 +877,7 @@ class MenuManager(tk.Toplevel):
             self.menu_data.append({
                 "name": name, 
                 "price": price, 
-                "visible": True, 
-                "mobile_visible": False,
+                "visible": True,
                 "order": new_order
             })
             self.refresh_list()
@@ -1076,7 +890,6 @@ class MenuManager(tk.Toplevel):
                 self.menu_data[i]["order"] = int(v["order"].get())
             except: pass 
             self.menu_data[i]["visible"] = v["vis"].get()
-            self.menu_data[i]["mobile_visible"] = v["mob"].get()
 
     def save(self):
         self.sync_from_ui()
@@ -1131,11 +944,7 @@ class CollapsibleControlPanel(tk.Frame):
         mk_btn("📝 ログ閲覧", self.app.open_log_viewer)
         mk_btn("📅 表示ターム設定", self.open_term_settings) 
         
-        tk.Label(self.content_f, text="MOBILE", font=("Helvetica", 8, "bold"), fg="#90A4AE", bg=COLORS["sidebar_bg"], anchor="w").pack(fill="x", padx=15, pady=(20,2))
-        mk_btn("📱 接続QR表示", self.app.show_qr_code)
-        mk_btn("⚙️ モバイル設定", self.app.open_mobile_settings)
-        mk_btn("📡 通信設定", self.app.open_connection_settings) 
-        
+
         tk.Label(self.content_f, text="SYSTEM", font=("Helvetica", 8, "bold"), fg="#90A4AE", bg=COLORS["sidebar_bg"], anchor="w").pack(fill="x", padx=15, pady=(20,2))
         mk_btn("🔧 管理者設定", self.app.show_admin_login)
 
@@ -1156,7 +965,7 @@ class CollapsibleControlPanel(tk.Frame):
             self.btn_menu.configure(bg=COLORS["sidebar_btn_hover"])
         self.is_expanded = not self.is_expanded
 
-    def update_status(self, term_user, is_online):
+    def update_status(self, term_user):
         self.lbl_term_user.config(text=term_user)
         
     def set_operator_name(self, op_name):
@@ -1314,7 +1123,6 @@ class MenuManager(tk.Toplevel):
             f_sw.pack(side="right")
             
             v_vis = tk.BooleanVar(value=item.get("visible", True))
-            v_mob = tk.BooleanVar(value=item.get("mobile_visible", False))
             
             def create_sw(parent, text, var, color):
                 f = tk.Frame(parent, bg="white", padx=8)
@@ -1324,12 +1132,10 @@ class MenuManager(tk.Toplevel):
                 tk.Checkbutton(f, variable=var, bg="white", activebackground="white", selectcolor="white").pack()
 
             create_sw(f_sw, "PC表示", v_vis, "#4CAF50")
-            create_sw(f_sw, "Mobile", v_mob, "#2196F3")
             
             self.item_vars.append({
                 "order": v_order,
-                "vis": v_vis, 
-                "mob": v_mob
+                "vis": v_vis
             })
 
     def add_item_dialog(self):
@@ -1346,8 +1152,7 @@ class MenuManager(tk.Toplevel):
             self.menu_data.append({
                 "name": name, 
                 "price": price, 
-                "visible": True, 
-                "mobile_visible": False,
+                "visible": True,
                 "order": new_order
             })
             self.refresh_list()
@@ -1360,7 +1165,6 @@ class MenuManager(tk.Toplevel):
                 self.menu_data[i]["order"] = int(v["order"].get())
             except: pass 
             self.menu_data[i]["visible"] = v["vis"].get()
-            self.menu_data[i]["mobile_visible"] = v["mob"].get()
 
     def save(self):
         self.sync_from_ui()
@@ -1371,181 +1175,6 @@ class MenuManager(tk.Toplevel):
         if self.on_save_callback:
             self.on_save_callback()
 
-class NotificationPanel(tk.Frame):
-    def __init__(self, parent, data_manager):
-        super().__init__(parent, bg=COLORS["notify_bg"], height=170) 
-        self.dm = data_manager 
-        self.pack_propagate(False)
-        
-        h = tk.Frame(self, bg="#263238", pady=4)
-        h.pack(fill="x")
-        # ★変更: 操作説明を更新 (Space:承認)
-        tk.Label(h, text="▲ モバイル注文 (←/→:選択, Space:承認, Del:取消)", font=("Helvetica", 9, "bold"), fg="#ECEFF1", bg="#263238").pack(side="left", padx=10)
-        
-        self.canvas = tk.Canvas(self, bg=COLORS["notify_bg"], highlightthickness=0)
-        self.sb = ttk.Scrollbar(self, orient="horizontal", command=self.canvas.xview)
-        self.inner = tk.Frame(self.canvas, bg=COLORS["notify_bg"])
-        
-        self.inner.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
-        self.window_id = self.canvas.create_window((0,0), window=self.inner, anchor="nw")
-        
-        self.canvas.configure(xscrollcommand=self.sb.set)
-        self.sb.pack(side="bottom", fill="x")
-        self.canvas.pack(side="left", fill="both", expand=True)
-        
-        self.notifications = []
-        self.selected_index = -1
-
-    def add_notification(self, data, on_approve=None, on_cancel=None):
-        card_container = tk.Frame(self.inner, bd=0, relief="flat", bg=COLORS["notify_bg"])
-        border = tk.Frame(card_container, bg=COLORS["notify_border_base"], padx=1, pady=1)
-        border.pack(fill="both", expand=True, padx=3, pady=3)
-        
-        content_bg = "#FFFFFF"
-        content = tk.Frame(border, bg=content_bg, padx=4, pady=4, width=160, height=125) 
-        content.pack_propagate(False)
-        content.pack(fill="both", expand=True)
-        
-        btn_f = tk.Frame(content, bg=content_bg, pady=0)
-        btn_f.pack(side="top", fill="x", pady=(0, 2))
-        
-        def approve_cmd():
-            if on_approve and on_approve():
-                idx = self.get_notification_index_by_id(data['id'])
-                if idx != -1: self.remove_notification(idx)
-        
-        def cancel_cmd():
-            if on_cancel and on_cancel():
-                idx = self.get_notification_index_by_id(data['id'])
-                if idx != -1: self.remove_notification(idx)
-
-        # ★変更: ボタンテキストを更新 (Spc)
-        b_ok = tk.Button(btn_f, text="承認(Spc)", bg="#E8F5E9", fg="#2E7D32", font=("Helvetica", 8, "bold"), 
-                         relief="flat", bd=0, command=approve_cmd, cursor="hand2", takefocus=0)
-        b_ok.pack(side="left", fill="x", expand=True, padx=1)
-        
-        b_ng = tk.Button(btn_f, text="取消", bg="#FFEBEE", fg="#C62828", font=("Helvetica", 8, "bold"), 
-                         relief="flat", bd=0, command=cancel_cmd, cursor="hand2", takefocus=0)
-        b_ng.pack(side="left", fill="x", expand=True, padx=1)
-        
-        h_frame = tk.Frame(content, bg=content_bg)
-        h_frame.pack(fill="x")
-        tk.Label(h_frame, text=f"{data['timestamp']}", font=("Arial", 8), fg="#90A4AE", bg=content_bg).pack(side="right")
-        tk.Label(h_frame, text=data['user'], font=("Helvetica", 9, "bold"), fg="#37474F", bg=content_bg).pack(side="left")
-        
-        type_color = "#43A047" if data['ptype'] == 'cash' else "#E53935"
-        tk.Label(content, text=f"【{data['ptype'].upper()}】注文", font=("Arial", 8, "bold"), fg=type_color, bg=content_bg, anchor="w").pack(fill="x", pady=(0,0))
-        
-        items_f = tk.Frame(content, bg=content_bg)
-        items_f.pack(fill="both", expand=True, pady=0)
-        
-        item_strings = [f"{item['name']}×{item['amount']}" for item in data['items']]
-        full_text = ", ".join(item_strings)
-        
-        CHAR_LIMIT = 26
-        if len(full_text) > CHAR_LIMIT:
-            display_text = full_text[:CHAR_LIMIT] + "..."
-        else:
-            display_text = full_text
-            
-        tk.Label(items_f, text=display_text, font=("Helvetica", 9), bg=content_bg, fg="#333", 
-                 anchor="nw", justify="left", wraplength=150).pack(fill="both", expand=True)
-
-        card_container.pack(side="left", anchor="n", fill="y")
-        
-        notif_obj = {
-            'data': data,
-            'widget': card_container,
-            'border': border,
-            'content': content,
-            'approve_func': approve_cmd,
-            'cancel_func': cancel_cmd
-        }
-        self.notifications.append(notif_obj)
-        
-        self.inner.update_idletasks()
-
-        if self.selected_index != -1 and self.selected_index < len(self.notifications) - 1:
-            pass 
-        else:
-            new_idx = len(self.notifications) - 1
-            self.select_index(new_idx)
-            self.canvas.xview_moveto(1.0)
-            
-        self.trigger_alert(notif_obj, data['ptype'])
-
-    def trigger_alert(self, notif_obj, ptype):
-        try:
-            settings = self.dm.get_notification_settings()
-        except:
-            settings = {"cash": False, "paypay": False}
-        
-        if settings.get(ptype, False):
-            self.master.bell()
-            original_col = "#2196F3" if self.selected_index != -1 and notif_obj == self.notifications[self.selected_index] else COLORS["notify_border_base"]
-            alert_col = "#FFC107"
-            def flash(count):
-                if count == 0:
-                    self._set_border_style(notif_obj, original_col, 1)
-                    return
-                new_col = alert_col if count % 2 == 0 else original_col
-                padding = 3 if new_col == alert_col else 1
-                self._set_border_style(notif_obj, new_col, padding)
-                self.update_idletasks() 
-                self.after(150, lambda: flash(count - 1))
-            flash(8)
-
-    def _style_card(self, notif_obj, selected):
-        if selected:
-            bd_col = "#2196F3"; pad = 3
-        else:
-            bd_col = COLORS["notify_border_base"]; pad = 1
-        self._set_border_style(notif_obj, bd_col, pad)
-
-    def _set_border_style(self, notif_obj, color, padding):
-        notif_obj['border'].config(bg=color, padx=padding, pady=padding)
-
-    def select_index(self, index):
-        if not self.notifications: return
-        if 0 <= self.selected_index < len(self.notifications):
-            self._style_card(self.notifications[self.selected_index], False)
-        if index < 0: index = 0
-        if index >= len(self.notifications): index = len(self.notifications) - 1
-        self.selected_index = index
-        self._style_card(self.notifications[index], True)
-        if len(self.notifications) > 1:
-            pos = index / (len(self.notifications) - 1)
-            self.canvas.xview_moveto(pos)
-
-    def select_next(self): self.select_index(self.selected_index + 1)
-    def select_prev(self): self.select_index(self.selected_index - 1)
-    def get_selected_data(self):
-        if 0 <= self.selected_index < len(self.notifications): return self.notifications[self.selected_index]['data']
-        return None
-
-    def trigger_selected_action(self, action_type):
-        if 0 <= self.selected_index < len(self.notifications):
-            target = self.notifications[self.selected_index]
-            if action_type == 'approve':
-                if target['approve_func'](): self.remove_selected()
-            elif action_type == 'cancel':
-                target['cancel_func']()
-
-    def remove_selected(self): self.remove_notification(self.selected_index)
-    def remove_notification(self, index):
-        if 0 <= index < len(self.notifications):
-            target = self.notifications.pop(index)
-            target['widget'].destroy()
-            if self.selected_index >= len(self.notifications): self.selected_index = len(self.notifications) - 1
-            if self.selected_index >= 0: self.select_index(self.selected_index)
-            else: self.selected_index = -1
-            self.inner.update_idletasks()
-            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-    def get_notification_index_by_id(self, notif_id):
-        for i, n in enumerate(self.notifications):
-            if n['data']['id'] == notif_id: return i
-        return -1
-
 # ★変更: 色付けと敬称制御を追加した注文確認ウィンドウ
 
 # gui_parts.py (変更クラスのみ)
@@ -1553,25 +1182,17 @@ class NotificationPanel(tk.Frame):
 # gui_parts.py (変更クラスのみ)
 
 class OrderSummaryWindow(tk.Toplevel):
-    def __init__(self, parent, items, total_qty, total_yen, on_confirm_callback, mode="PC", user_name=None):
+    def __init__(self, parent, items, total_qty, total_yen, on_confirm_callback):
         super().__init__(parent)
         self.on_confirm = on_confirm_callback
         self.items = items
         self.total_qty = total_qty
         self.total_yen = total_yen
-        self.mode = mode
-        self.user_name = user_name
 
-        if self.mode == "MOBILE":
-            self.theme_color = "#E3F2FD" 
-            self.title_text = "モバイル注文承認"
-            self.header_main = f"{user_name} からの注文"
-            self.header_sub = "Mobile Order Confirmation"
-        else:
-            self.theme_color = "#F1F8E9"
-            self.title_text = "注文確認"
-            self.header_main = "注文内容を確認して確定してください"
-            self.header_sub = "Order Confirmation"
+        self.theme_color = "#F1F8E9"
+        self.title_text = "注文確認"
+        self.header_main = "注文内容を確認して確定してください"
+        self.header_sub = "Order Confirmation"
 
         self.title(self.title_text)
         
@@ -1644,8 +1265,6 @@ class OrderSummaryWindow(tk.Toplevel):
         
         btn_text = "確定する (Enter)"
         btn_bg = COLORS["btn_success"]
-        if self.mode == "MOBILE":
-            btn_bg = COLORS["btn_info"]
             
         tk.Button(f_btn, text=btn_text, font=("Helvetica", 11, "bold"), bg=btn_bg, fg="white", 
                   relief="flat", height=2, width=20, command=self.do_confirm).pack(side="right")
@@ -1665,7 +1284,7 @@ class OrderSummaryWindow(tk.Toplevel):
             ptype_disp = "現金"
             type_bg = "#E8F5E9"; type_fg = "#1B5E20"
         else:
-            ptype_disp = "PayPay"
+            ptype_disp = "Square"
             type_bg = "#FFEBEE"; type_fg = "#B71C1C"
 
         tk.Label(f, text=name, font=("Helvetica", 11), bg=bg_color, fg="#333", width=25, anchor="w", wraplength=200, justify="left").pack(side="left")
@@ -1862,16 +1481,9 @@ class CollapsibleControlPanel(tk.Frame):
         mk_btn("📝 ログ閲覧", self.app.open_log_viewer)
         mk_btn("📅 表示ターム設定", self.open_term_settings) 
         
-        tk.Label(self.content_f, text="MOBILE", font=("Helvetica", 8, "bold"), fg="#90A4AE", bg=COLORS["sidebar_bg"], anchor="w").pack(fill="x", padx=15, pady=(20,2))
-        mk_btn("📱 接続QR表示", self.app.show_qr_code)
-        mk_btn("⚙️ モバイル設定", self.app.open_mobile_settings)
-        mk_btn("📡 通信設定", self.app.open_connection_settings) 
-        
+
         tk.Label(self.content_f, text="SYSTEM", font=("Helvetica", 8, "bold"), fg="#90A4AE", bg=COLORS["sidebar_bg"], anchor="w").pack(fill="x", padx=15, pady=(20,2))
         mk_btn("🔧 管理者設定", self.app.show_admin_login)
-        
-        self.lbl_err = tk.Label(self.content_f, text="", fg="#FF5252", bg=COLORS["sidebar_bg"], font=("Arial", 9), wraplength=180, justify="left")
-        self.lbl_err.pack(side="bottom", fill="x", padx=15, pady=20)
 
     def open_term_settings(self):
         if self.app.active_sales_mode:
@@ -1895,17 +1507,12 @@ class CollapsibleControlPanel(tk.Frame):
             self.btn_menu.configure(bg=COLORS["sidebar_btn_hover"])
         self.is_expanded = not self.is_expanded
 
-    def update_status(self, term_user, is_online):
+    def update_status(self, term_user):
         self.lbl_term_user.config(text=term_user)
         
     def set_operator_name(self, op_name):
         self.lbl_operator.config(text=f"Op: {op_name}")
 
-    def set_ngrok_error(self, msg):
-        self.lbl_err.config(text=f"⚠ {msg}")
-
-    def clear_ngrok_error(self):
-        self.lbl_err.config(text="")
 
 # gui_parts.py (SalesCard クラス全文)
 
@@ -1933,20 +1540,10 @@ class SalesCard(tk.Frame):
         self.counts = {'term': {'cash': 0, 'paypay': 0}, 'cumulative': {'cash': 0, 'paypay': 0}, 'total': {'cash': 0, 'paypay': 0}}
         self.draft_counts = {'cash': 0, 'paypay': 0}
         
-        self.mobile_active = False
         self.labels = {}
         self.setup_ui()
 
     def setup_ui(self):
-        if self.item_index < 9: key_char = str(self.item_index + 1)
-        elif self.item_index == 9: key_char = "0"
-        else: key_char = "-"
-
-        self.btn_mobile = tk.Button(self, text=f"Mob: OFF [{key_char}]", font=("Helvetica", 9, "bold"), 
-                                    bg=COLORS["mob_off_bg"], fg=COLORS["mob_off_fg"], 
-                                    relief="flat", bd=0, command=self.toggle_mobile, takefocus=0)
-        self.btn_mobile.pack(side="top", fill="x", ipady=3)
-
         h = tk.Frame(self, bg=COLORS["card_bg"], pady=5, height=55)
         h.pack(side="top", fill="x")
         h.pack_propagate(False)
@@ -1969,18 +1566,12 @@ class SalesCard(tk.Frame):
         
         cc = tk.Frame(self, bg=COLORS["bg"]); cc.pack(side="top", fill="both", expand=True, pady=(5,0))
         self.create_col(cc, 'cash', COLORS["cash_bg"], COLORS["cash_fg"], COLORS["cash_btn"], "現", 0)
-        self.create_col(cc, 'paypay', COLORS["pay_bg"], COLORS["pay_fg"], COLORS["pay_btn"], "Pay", 1)
-        
-        self.monitor_frame = tk.Frame(self, bg=COLORS["card_bg"], height=40)
-        self.monitor_frame.pack(side="bottom", fill="x")
-        self.monitor_label = tk.Label(self.monitor_frame, text="", font=("Helvetica", 9), bg=COLORS["card_bg"], fg="#999", anchor="w", wraplength=self.card_width-5)
-        self.monitor_label.pack(fill="both", padx=5, pady=2)
+        self.create_col(cc, 'paypay', COLORS["pay_bg"], COLORS["pay_fg"], COLORS["pay_btn"], "Square", 1)
 
     def resize(self, width, height):
         self.config(width=width, height=height)
         self.card_width = width
         self._update_name_label()
-        self.monitor_label.config(wraplength=width-5)
 
     def _update_name_label(self):
         try:
@@ -2076,27 +1667,6 @@ class SalesCard(tk.Frame):
                 changes = True
         if changes: self.refresh_display()
             
-    def update_term_count(self, ptype, amount, user_name=None):
-        old_val = self.counts['term'][ptype]
-        new_val = old_val + amount
-        if not self.allow_negative and new_val < 0: return
-        
-        real_diff = new_val - old_val
-        if real_diff == 0: return
-
-        action = "Add" if real_diff > 0 else "Sub"
-        val_str = f"{real_diff:+d} (Term: {new_val})"
-        target_str = f"{self.name} [{ptype}]"
-        if user_name: val_str += f" by {user_name}"
-
-        self.log_func(self.current_mode, action, target_str, val_str)
-        
-        self.counts['term'][ptype] = new_val
-        self.counts['cumulative'][ptype] += real_diff
-        self.counts['total'][ptype] += real_diff
-        self.refresh_display()
-        if self.auto_save_callback: self.auto_save_callback()
-
     def refresh_display(self):
         if 'cash_count' in self.labels: self.labels['cash_count'].config(text=str(self.counts['term']['cash']))
         if 'paypay_count' in self.labels: self.labels['paypay_count'].config(text=str(self.counts['term']['paypay']))
@@ -2130,30 +1700,6 @@ class SalesCard(tk.Frame):
         self.draft_counts = {'cash': 0, 'paypay': 0} 
         self.refresh_display()
         
-    def toggle_mobile(self):
-        self.mobile_active = not self.mobile_active
-        if self.item_index < 9: key_char = str(self.item_index + 1)
-        elif self.item_index == 9: key_char = "0"
-        else: key_char = "-"
-
-        if self.mobile_active:
-            self.btn_mobile.config(text=f"📡 Mob: ON [{key_char}]", bg=COLORS["mob_on_bg"], fg=COLORS["mob_on_fg"])
-            self.log_func(self.current_mode, "ToggleMobile", self.name, "ON")
-        else:
-            self.btn_mobile.config(text=f"Mob: OFF [{key_char}]", bg=COLORS["mob_off_bg"], fg=COLORS["mob_off_fg"])
-            self.log_func(self.current_mode, "ToggleMobile", self.name, "OFF")
-    
-    def update_monitor(self, watchers):
-        watchers_text = ", ".join(watchers)
-        txt = "🛒 " + watchers_text if watchers else ""
-        if watchers:
-            bg_col = COLORS["monitor_active_bg"]; fg_col = COLORS["monitor_text"]
-        else:
-            bg_col = COLORS["card_bg"]; fg_col = "#999"
-        if self.monitor_label.cget("text") != txt:
-            self.monitor_label.config(text=txt, bg=bg_col, fg=fg_col)
-            self.monitor_frame.config(bg=bg_col)
-    
     def get_totals(self):
         calc = lambda d: (d['cash'] + d['paypay']) * self.price
         return calc(self.counts['term']), calc(self.counts['cumulative']), calc(self.counts['total'])

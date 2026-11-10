@@ -39,23 +39,19 @@
                 <button class="nav-item" data-nav="register">
                     <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 3h3l2.6 12h11.2L21 7H6.2"/><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/></svg>
                     Register
-                    <span class="nav-badge" id="nav-badge" hidden></span>
                 </button>
                 <button class="nav-item" data-nav="settings">
                     <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2.5l2 2.6 3.2-.6.9 3.1 3 1.3-1.2 3.1 1.2 3.1-3 1.3-.9 3.1-3.2-.6-2 2.6-2-2.6-3.2.6-.9-3.1-3-1.3L4 12 2.8 8.9l3-1.3.9-3.1 3.2.6z"/></svg>
                     Settings
                 </button>
             </nav>
-            <button class="side-status" id="side-status" data-action="qr" title="スマホ接続用の QR を表示">
-                <span class="status-dot"></span>
-                <span id="side-status-text">モバイル未接続</span>
-            </button>
         </aside>
 
         <main class="main">
             <!-- ダッシュボード -->
             <section id="view-dashboard" class="view dashboard" hidden>
                 <nav class="tabs" id="dash-tabs"></nav>
+                <!-- 左に 4 つのパネル（2 × 2）、右に縦長の「Square」の列（照合と支払い方法の内訳） -->
                 <div class="dash-grid">
                     <article class="panel">
                         <p class="eyebrow">HOURLY SALES</p>
@@ -98,6 +94,20 @@
                             <div><span class="kpi-label">前日比</span><strong class="kpi kpi-s" id="ov-change">—</strong></div>
                         </div>
                     </article>
+
+                    <!-- Square 照合（レジに記録した Square の売上と、Square で実際に決済された金額）と支払い方法の内訳 -->
+                    <article class="panel sq-panel" id="dash-square">
+                        <div class="sq-panel-head">
+                            <div>
+                                <p class="eyebrow">SQUARE</p>
+                                <h2 class="panel-title">Square 照合</h2>
+                            </div>
+                        </div>
+                        <div class="sq-panel-body" id="dash-square-body"></div>
+                        <h3 class="sq-sub-title">支払い方法の内訳</h3>
+                        <div class="paymix" id="paymix"></div>
+                        <p class="paymix-note" id="paymix-note"></p>
+                    </article>
                 </div>
             </section>
 
@@ -109,41 +119,45 @@
                 <div class="reg-idle" id="reg-idle" hidden>
                     <p class="eyebrow">REGISTER</p>
                     <h2 class="page-title">上のタブから期間を選んでください</h2>
-                    <button class="btn btn-ghost" data-action="qr">接続QR表示</button>
                 </div>
 
                 <!-- 販売中 -->
                 <div class="reg-body" id="reg-body" hidden>
-                    <div class="reg-header">
-                        <button class="btn btn-dark" data-action="exit">終了</button>
-                        <div class="mode-name" id="mode-name"></div>
-                        <div class="mode-note" id="mode-note"></div>
+                    <!-- 上の帯：期間名・料金/累積/総合・担当者 -->
+                    <div class="panel reg-head">
+                        <button class="btn btn-ghost" data-action="exit">終了</button>
+                        <div class="reg-title">
+                            <!-- テスト・調整のときの注意は、幅を取らないよう小見出しの横に小さく出す -->
+                            <div class="reg-eyebrow-row">
+                                <p class="eyebrow">REGISTER</p>
+                                <span class="mode-note" id="mode-note"></span>
+                            </div>
+                            <h2 class="page-title" id="mode-name"></h2>
+                        </div>
                         <div class="totals">
-                            <div class="total"><span>料金</span><strong id="total-term">¥0</strong></div>
-                            <div class="total"><span>累積</span><strong id="total-cumulative">¥0</strong></div>
-                            <div class="total"><span>総合</span><strong id="total-total">¥0</strong></div>
+                            <div class="total"><span class="kpi-label">料金</span><strong class="kpi" id="total-term">¥0</strong></div>
+                            <div class="total"><span class="kpi-label">累積</span><strong class="kpi" id="total-cumulative">¥0</strong></div>
+                            <div class="total"><span class="kpi-label">総合</span><strong class="kpi" id="total-total">¥0</strong></div>
+                            <button class="total sq-check" id="sq-check" data-action="square-check">
+                                <span class="kpi-label" id="sq-label">Square 実績</span>
+                                <strong class="kpi" id="sq-actual">—</strong>
+                                <span class="sq-diff" id="sq-diff"></span>
+                            </button>
                         </div>
                         <div class="operator">
                             担当 <strong id="operator-name"></strong>
-                            <button class="btn btn-dark btn-small" data-action="change-operator">変更</button>
+                            <button class="btn btn-ghost btn-small" data-action="change-operator">変更</button>
                         </div>
-                        <button class="btn btn-dark" data-action="qr">QR</button>
                     </div>
 
-                    <div class="cards" id="cards"></div>
-
-                    <div class="draft-bar" id="draft-bar">
-                        <span id="draft-summary"></span>
-                        <span class="hints">F1: 全て現金へ  F2: 全てPayPayへ  BackSpace: 入力を取消</span>
-                        <button class="btn btn-primary" id="commit-btn" data-action="commit">確定</button>
+                    <!-- 商品 -->
+                    <div class="panel products">
+                        <p class="eyebrow">PRODUCTS</p>
+                        <div class="cards" id="cards"></div>
                     </div>
 
-                    <div class="notify-panel">
-                        <div class="notify-head">
-                            モバイル注文
-                            <span class="hints">←/→: 選択  Space: 承認  Del: 取消</span>
-                        </div>
-                        <div class="notify-list" id="notify-list"></div>
+                    <div class="panel draft-bar" id="draft-bar">
+                        <span id="draft-summary"></span>                        <button class="btn btn-primary" id="commit-btn" data-action="commit">確定</button>
                     </div>
                 </div>
             </section>
@@ -169,9 +183,10 @@
         <div class="modal" id="modal-body"></div>
     </div>
 
-    <!-- dashboard.js / settings.js の関数を register.js から呼ぶので、register.js を最後に読み込む -->
+    <!-- dashboard.js / settings.js / square.js の関数を register.js から呼ぶので、register.js を最後に読み込む -->
     <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
     <script src="{{ url_for('static', filename='settings.js') }}"></script>
+    <script src="{{ url_for('static', filename='square.js') }}"></script>
     <script src="{{ url_for('static', filename='register.js') }}"></script>
     {% if dev %}
     <script>

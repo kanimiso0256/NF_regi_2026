@@ -6,6 +6,13 @@
 const DASH_POLL_MS = 5000;
 const MIX_COLORS = ["#f43f5e", "#f97316", "#eab308", "#22c55e", "#3b82f6"];
 const MIX_OTHER_COLOR = "#b0bec5";
+// 支払い方法の色（決まっていないものは PAY_EXTRA_COLORS から順に使う）
+const PAY_COLORS = {
+    "現金": "#90a4ae", "Square": "#5b7ba6", "カード": "#5b7ba6", "PayPay": "#ef4444",
+    "交通系IC": "#22c55e", "iD": "#f59e0b", "QUICPay": "#0ea5e9", "電子マネー": "#84cc16",
+};
+const PAY_EXTRA_COLORS = ["#a78bfa", "#14b8a6", "#ec4899", "#eab308", "#64748b"];
+const PAY_MAX_ROWS = 6;   // これより多い支払い方法は「その他」にまとめる
 const SVG_NS = 'xmlns="http://www.w3.org/2000/svg"';
 
 const dash = { term: null, data: null };
@@ -30,6 +37,7 @@ async function refreshDashboard() {
     dash.data = data;
     dash.term = data.term;
     renderDashboard(data);
+    refreshDashSquare();
 }
 
 // グラフの表示場所の大きさが変わったら（ウィンドウの拡大縮小など）、その大きさで描き直す
@@ -45,6 +53,7 @@ new ResizeObserver(([entry]) => {
 function selectDashTerm(term) {
     if (term === dash.term) return;
     dash.term = term;
+    $("dash-square-body").innerHTML = "";
     refreshDashboard();
 }
 
@@ -61,6 +70,9 @@ function renderDashboard(d) {
 
     // 種類別売上内訳
     $("mix").innerHTML = d.mix.length ? mixChart(d.mix) : `<p class="chart-empty">まだ売上がありません</p>`;
+
+    // 支払い方法の内訳（Square の内訳は square.js が取得したあとにも描き直す）
+    renderPayMix();
 
     // 目標額の達成状況
     $("gauge").innerHTML = gaugeChart(d.rate);
@@ -87,7 +99,7 @@ function renderDashboard(d) {
 // ---------- 時間別売上（折れ線） ----------
 // 目盛りがきりのいい数字になるよう、1 段の幅を 1・2・2.5・5 × 10^n に切り上げる
 function niceMax(v, steps) {
-    if (v <= 0) return 10000;
+    if (v <= 0) return 2000 * steps;   // 売上がないときも 1 段 2,000 円のきりのいい目盛りにする
     const raw = (v * 1.1) / steps;
     const mag = 10 ** Math.floor(Math.log10(raw));
     const step = [1, 2, 2.5, 5, 10].find((s) => s * mag >= raw) * mag;
@@ -110,9 +122,12 @@ function lineChart(hourly, el) {
     const grid = ticks.map((v) => `
         <line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/>
         <text class="axis" x="${L - 10}" y="${y(v) + 4}" text-anchor="end">${v.toLocaleString()}</text>`).join("");
+    // 横幅が狭くて時刻の文字が重なるときは、1 時間おき・2 時間おき…に間引いて表示する
+    const gap = n > 1 ? (W - L - R) / (n - 1) : W;
+    const every = Math.ceil(44 / gap);
     const cols = hourly.map((h, i) => `
         <line class="grid" x1="${x(i)}" x2="${x(i)}" y1="${T}" y2="${H - B}"/>
-        <text class="axis" x="${x(i)}" y="${H - B + 17}" text-anchor="middle">${h.hour}:00</text>`).join("");
+        ${i % every === 0 ? `<text class="axis" x="${x(i)}" y="${H - B + 17}" text-anchor="middle">${h.hour}:00</text>` : ""}`).join("");
     const pts = hourly.map((h, i) => [x(i), y(h.amount)]);
     const dots = hourly.map((h, i) => `
         <circle class="line-dot" cx="${pts[i][0]}" cy="${pts[i][1]}" r="${compact ? 4 : 5}"><title>${h.hour}:00  ${yenJp(h.amount)}</title></circle>`).join("");
@@ -171,6 +186,70 @@ function mixChart(mix) {
             <text class="donut-value" x="${C}" y="${C + 22}" text-anchor="middle">${pct(mix[0].pct)}</text>
         </svg>
         <ul class="mix-legend">${legend}</ul>`;
+}
+
+// ---------- 支払い方法の内訳（ドーナツ） ----------
+// 現金はレジの記録、それ以外は Square の決済（取得できないときはレジの「Square」の枠の記録）
+function payRows() {
+    const d = dash.data;
+    const r = sq.dashData?.term === d.term ? sq.dashData : null;
+    const fromSquare = r && r.configured && !r.error && Object.keys(r.methods || {}).length > 0;
+    let rows = [{ name: "現金", amount: d.pay.cash }];
+    if (fromSquare) {
+        rows.push(...Object.entries(r.methods).map(([name, amount]) => ({ name, amount })));
+    } else {
+        rows.push({ name: "Square", amount: d.pay.square });
+    }
+    rows = rows.filter((x) => x.amount > 0).sort((a, b) => b.amount - a.amount);
+    if (rows.length > PAY_MAX_ROWS) {
+        const rest = rows.slice(PAY_MAX_ROWS - 1);
+        rows = rows.slice(0, PAY_MAX_ROWS - 1)
+            .concat({ name: "その他", amount: rest.reduce((a, x) => a + x.amount, 0), other: true });
+    }
+    const total = rows.reduce((a, x) => a + x.amount, 0);
+    let extra = 0;
+    for (const x of rows) {
+        x.pct = total ? (x.amount / total) * 100 : 0;
+        x.color = x.other ? MIX_OTHER_COLOR : PAY_COLORS[x.name] || PAY_EXTRA_COLORS[extra++ % PAY_EXTRA_COLORS.length];
+    }
+    return { rows, total, fromSquare, r };
+}
+
+function renderPayMix() {
+    if (!dash.data?.term) return;
+    const { rows, total, fromSquare, r } = payRows();
+    const cashless = total ? ((total - (rows.find((x) => x.name === "現金")?.amount || 0)) / total) * 100 : 0;
+    $("paymix").innerHTML = rows.length ? payChart(rows, cashless) : `<p class="chart-empty">まだ売上がありません</p>`;
+    // Square の内訳を出せているときは説明なし。出せないときだけ理由を書く
+    $("paymix-note").textContent = fromSquare
+        ? ""
+        : r?.configured ? "Square の内訳を取得できないため、レジの記録で表示しています"
+            : "Square を設定すると、カード・電子マネー・QR の内訳が出ます";
+}
+
+function payChart(rows, cashless) {
+    const C = 130, R1 = 124, R0 = 76;
+    let angle = 0;
+    const slices = rows.map((x) => {
+        const sweep = Math.min(359.99, (x.pct / 100) * 360);
+        const path = arcPath(C, C, R1, R0, angle, angle + sweep);
+        angle += sweep;
+        return `<path d="${path}" fill="${x.color}"><title>${esc(x.name)}  ${yenJp(x.amount)}</title></path>`;
+    }).join("");
+    const legend = rows.map((x) => `
+        <li>
+            <span class="swatch" style="background:${x.color}"></span>
+            <span class="mix-name">${esc(x.name)}</span>
+            <span class="paymix-amount">${yenJp(x.amount)}</span>
+            <span class="mix-pct">${pct(x.pct)}</span>
+        </li>`).join("");
+    return `
+        <svg ${SVG_NS} class="donut" viewBox="0 0 ${C * 2} ${C * 2}" role="img" aria-label="支払い方法の内訳のグラフ">
+            <g class="slices">${slices}</g>
+            <text class="donut-label" x="${C}" y="${C - 20}" text-anchor="middle">キャッシュレス</text>
+            <text class="donut-value" x="${C}" y="${C + 24}" text-anchor="middle">${pct(cashless, 0)}</text>
+        </svg>
+        <ul class="mix-legend paymix-legend">${legend}</ul>`;
 }
 
 // ---------- 目標額の達成状況（ゲージ） ----------

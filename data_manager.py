@@ -65,18 +65,12 @@ class DataManager:
         default_settings = {
             "terms": ["1日目", "2日目", "3日目", "4日目"], 
             "adminPass": "password",
-            "active_terms": ["1日目", "テスト", "調整"], 
-            "ngrok_token": "", 
-            "mobile_password": "1234",
-            "mobile_info": "",
-            "mobile_alert": "",
-            "terminal_user": "", 
-            "notify_alert": { "cash": True, "paypay": True },
-            "ngrok_connect_enabled": True,
+            "active_terms": ["1日目", "テスト", "調整"],
+            "terminal_user": "",
             "card_settings": {"width": 130, "height": 0, "overflow": 6},
             "targets": {},
             "menu": [
-                {"name": "オリジナル", "price": 450, "visible": True, "mobile_visible": False, "order": 10},
+                {"name": "オリジナル", "price": 450, "visible": True, "order": 10},
             ]
         }
         if not os.path.exists(self.settings_path):
@@ -93,7 +87,6 @@ class DataManager:
                     data["card_settings"]["height"] = 0
                 if "menu" in data:
                     for i, item in enumerate(data["menu"]):
-                        if "mobile_visible" not in item: item["mobile_visible"] = False
                         if "order" not in item: item["order"] = (i + 1) * 10
                 self.save_settings_file(data)
                 return data
@@ -110,22 +103,6 @@ class DataManager:
         data["card_settings"] = {"width": width, "height": height, "overflow": overflow}
         self.save_settings_file(data)
 
-    def update_notification_settings(self, cash_alert, paypay_alert, user_name):
-        data = self.load_settings()
-        data["notify_alert"]["cash"] = cash_alert
-        data["notify_alert"]["paypay"] = paypay_alert
-        self.save_settings_file(data)
-        self.log_action(user_name, "Settings", "UpdateNotifyAlert", "Mobile", f"Cash:{cash_alert}, PayPay:{paypay_alert}")
-
-    def get_notification_settings(self):
-        return self.load_settings().get("notify_alert", {"cash": False, "paypay": False})
-
-    def update_ngrok_connect_enabled(self, enabled, user_name):
-        data = self.load_settings()
-        data["ngrok_connect_enabled"] = enabled
-        self.save_settings_file(data)
-        self.log_action(user_name, "Settings", "ToggleNgrokConnect", "System", f"Enabled:{enabled}")
-
     def update_active_terms(self, active_list):
         data = self.load_settings()
         data["active_terms"] = active_list
@@ -134,22 +111,6 @@ class DataManager:
     def update_menu(self, new_menu_list):
         data = self.load_settings()
         data["menu"] = new_menu_list
-        self.save_settings_file(data)
-
-    def update_ngrok_token(self, token):
-        data = self.load_settings()
-        data["ngrok_token"] = token
-        self.save_settings_file(data)
-        
-    def update_mobile_password(self, pw):
-        data = self.load_settings()
-        data["mobile_password"] = pw
-        self.save_settings_file(data)
-
-    def update_mobile_messages(self, info, alert):
-        data = self.load_settings()
-        data["mobile_info"] = info
-        data["mobile_alert"] = alert
         self.save_settings_file(data)
 
     def set_terminal_user(self, name):
@@ -262,7 +223,7 @@ class DataManager:
                 parts = line.split(",")
                 if len(parts) >= 2:
                     try:
-                        final_menu.append({"name": parts[0].strip(), "price": int(parts[1].strip()), "visible": True, "mobile_visible": False, "order": order_counter})
+                        final_menu.append({"name": parts[0].strip(), "price": int(parts[1].strip()), "visible": True, "order": order_counter})
                         order_counter += 10
                     except: pass
         else:
@@ -273,7 +234,6 @@ class DataManager:
         current_settings["adminPass"] = final_pass
         current_settings["active_terms"] = [t for t in current_settings["active_terms"] if t in final_terms]
         if not current_settings["active_terms"] and final_terms: current_settings["active_terms"] = [final_terms[0]]
-        current_settings["ngrok_connect_enabled"] = True
         self.save_settings_file(current_settings)
         self.init_log_file()
         self.log_action(admin_name, "System", "Factory Reset", "All Data", "Executed")
@@ -480,7 +440,7 @@ class DataManager:
                 if csv_cash != log_cash:
                     errors.append(f"[{t}] {name}(Cash): CSV={csv_cash}, Log={log_cash}")
                 if csv_pay != log_pay:
-                    errors.append(f"[{t}] {name}(Pay): CSV={csv_pay}, Log={log_pay}")
+                    errors.append(f"[{t}] {name}(Square): CSV={csv_pay}, Log={log_pay}")
                     
         if errors:
             error_msg = "❌ データの不整合が検出されました:\n" + "\n".join(errors[:10])

@@ -4,22 +4,15 @@
 "use strict";
 
 const PTYPES = ["cash", "paypay"];
-const PTYPE_JP = { cash: "現金", paypay: "PayPay" };
-const MOBILE_KEYS = "1234567890";
+const PTYPE_JP = { cash: "現金", paypay: "Square" };   // キーは過去の CSV と合わせて "paypay" のまま
 const POLL_MS = 1000;
-const CONNECTION_POLL_MS = 5000;
 
 const ui = {
     view: null,
     state: null,        // サーバーから受け取った最新の状態
     drafts: {},         // 商品名 → { cash, paypay }（未確定の入力）
-    selected: -1,       // 選択中のモバイル注文
     modal: null,        // 開いているモーダル { actions, onKey }
     cardsKey: "",       // 商品の並びが変わったときだけカードを作り直すための目印
-    notifsKey: "",
-    notifCount: 0,
-    knownNotifs: new Set(),
-    connection: { online: false, url: null },
 };
 
 const $ = (id) => document.getElementById(id);
@@ -69,10 +62,6 @@ async function navigate(target) {
 function applyState(s) {
     ui.state = s;
     $("side-user").textContent = s.terminal_user;
-    // 販売中にほかの画面を見ていても、モバイル注文が来たことが分かるようにする
-    const pending = s.active ? s.notifications.length : 0;
-    $("nav-badge").hidden = pending === 0;
-    $("nav-badge").textContent = pending;
 }
 
 async function init() {
@@ -94,8 +83,6 @@ async function init() {
     }
     setInterval(poll, POLL_MS);
     setInterval(() => ui.view === "dashboard" && refreshDashboard(), DASH_POLL_MS);
-    pollConnection();
-    setInterval(pollConnection, CONNECTION_POLL_MS);
 }
 
 async function poll() {
@@ -115,16 +102,6 @@ async function poll() {
         return;
     }
     renderRegister();
-}
-
-async function pollConnection() {
-    try {
-        ui.connection = await api("/pc/api/connection");
-    } catch {
-        ui.connection = { online: false, url: null };
-    }
-    $("side-status").classList.toggle("online", ui.connection.online);
-    $("side-status-text").textContent = ui.connection.online ? "モバイル接続中" : "モバイル未接続";
 }
 
 // ---------- ログイン ----------
@@ -192,12 +169,12 @@ async function selectRegTerm(mode) {
         return;
     }
     if (mode === s.mode) return;
-    // 販売中の切り替えは担当者をそのまま引き継ぐ。消えてしまう入力・注文があるときだけ確認する
-    if (draftRows().length || s.notifications.length) {
+    // 販売中の切り替えは担当者をそのまま引き継ぐ。消えてしまう入力があるときだけ確認する
+    if (draftRows().length) {
         const ok = await confirmModal(
             "期間の切り替え",
-            `「${s.mode}」から「${mode}」に切り替えますか？\n未確定の入力と未処理のモバイル注文は削除されます。`,
-            "切り替える", false, { showKeys: false },
+            `「${s.mode}」から「${mode}」に切り替えますか？\n未確定の入力は削除されます。`,
+            "切り替える", false,
         );
         if (!ok) return;
     }
@@ -224,24 +201,23 @@ async function startOperation(mode) {
 function enterRegister(fresh = false) {
     if (fresh) {
         ui.drafts = {};
-        ui.selected = -1;
-        ui.notifCount = ui.state.notifications.length;
-        ui.knownNotifs = new Set(ui.state.notifications.map((n) => n.id));
     }
     ui.cardsKey = "";
-    ui.notifsKey = "";
     $("reg-idle").hidden = true;
     $("reg-body").hidden = false;
     if (!ui.regTerms) loadRegTerms();
     showView("register");
     renderRegister();
+    resetRegSquare();
 }
 
 function renderRegister() {
     const s = ui.state;
     renderRegTabs();
     $("mode-name").textContent = s.mode;
-    $("mode-note").textContent = s.is_test ? "テスト：保存されません" : s.allow_negative ? "調整：マイナス入力可" : "";
+    // 期間名（テスト・調整）はすぐ下に大きく出ているので、注意だけを短く出す
+    $("mode-note").textContent = s.is_test ? "保存されません" : s.allow_negative ? "マイナス入力可" : "";
+    $("mode-note").dataset.kind = s.is_test ? "test" : s.allow_negative ? "adjust" : "";
     $("operator-name").textContent = s.operator;
     $("total-term").textContent = yen(s.totals.term);
     $("total-cumulative").textContent = yen(s.totals.cumulative);
@@ -249,14 +225,14 @@ function renderRegister() {
     document.documentElement.style.setProperty("--card-width", `${s.card_width}px`);
     renderCards();
     updateCards();
-    renderNotifications();
     updateDraftBar();
+    onRegisterSquareState();
 }
 
 async function confirmExit() {
     const ok = await confirmModal(
         "モード終了",
-        "販売を終了しますか？\n・モバイル連携はこのモードで停止します\n・未処理のモバイル注文と未確定の入力は削除されます",
+        "販売を終了しますか？\n未確定の入力は削除されます",
         "終了する",
     );
     if (!ok) return;
@@ -280,11 +256,6 @@ async function changeOperator() {
 }
 
 // ---------- 商品カード ----------
-function mobileKeyLabel(i) {
-    if (i < 9) return String(i + 1);
-    return i === 9 ? "0" : "-";
-}
-
 function renderCards() {
     const key = ui.state.mode + "\n" + ui.state.items.map((it) => it.name).join("\n");
     if (key === ui.cardsKey) return;
@@ -293,30 +264,33 @@ function renderCards() {
         || `<p class="empty">表示する商品がありません（管理者設定 → メニュー管理で登録してください）</p>`;
 }
 
-function cardHtml(it, i) {
+function cardHtml(it) {
     const k = it.keys || ["", "", "", "", "", ""];
-    const col = (ptype, [kAdd, kPad, kSub]) => `
-        <div class="pay-col pay-${ptype}">
-            <div class="pay-title">${PTYPE_JP[ptype]}</div>
-            <div class="pay-count" data-f="count-${ptype}">0</div>
-            <div class="pay-draft" data-f="draft-${ptype}"></div>
-            <button class="pay-btn pay-add" data-act="add" data-ptype="${ptype}">＋<kbd>${esc(kAdd)}</kbd></button>
-            <button class="pay-btn pay-pad" data-act="pad" data-ptype="${ptype}">⌨<kbd>${esc(kPad)}</kbd></button>
-            <button class="pay-btn pay-sub" data-act="sub" data-ptype="${ptype}">－<kbd>${esc(kSub)}</kbd></button>
+    // 支払い方法ごとに 1 段：見出しと個数、その下に －・テンキー・＋ のボタン
+    const row = (ptype, [kAdd, kPad, kSub]) => `
+        <div class="pay-row pay-${ptype}">
+            <span class="pay-title">${PTYPE_JP[ptype]}</span>
+            <span class="pay-num">
+                <span class="pay-count" data-f="count-${ptype}">0</span>
+                <span class="pay-draft" data-f="draft-${ptype}"></span>
+            </span>
+            <div class="pay-btns">
+                <button class="pay-btn pay-sub" data-act="sub" data-ptype="${ptype}">－<kbd>${esc(kSub)}</kbd></button>
+                <button class="pay-btn pay-pad" data-act="pad" data-ptype="${ptype}">⌨<kbd>${esc(kPad)}</kbd></button>
+                <button class="pay-btn pay-add" data-act="add" data-ptype="${ptype}">＋<kbd>${esc(kAdd)}</kbd></button>
+            </div>
         </div>`;
     return `
         <article class="card">
-            <button class="mob-toggle" data-act="mob">Mob <span data-f="mob">OFF</span><kbd>${mobileKeyLabel(i)}</kbd></button>
             <div class="card-head">
                 <div class="item-name" title="${esc(it.name)}">${esc(it.name)}</div>
-                <div class="item-price">@${it.price.toLocaleString()}</div>
+                <div class="item-price"><span class="yen">¥</span>${it.price.toLocaleString()}</div>
             </div>
             <div class="card-stats">
                 <div><span>Term</span><b data-f="term">¥0</b></div>
                 <div><span>総合</span><b data-f="total">¥0</b></div>
             </div>
-            <div class="pay-cols">${col("cash", k.slice(0, 3))}${col("paypay", k.slice(3, 6))}</div>
-            <div class="watchers" data-f="watchers"></div>
+            <div class="pay-rows">${row("cash", k.slice(0, 3))}${row("paypay", k.slice(3, 6))}</div>
         </article>`;
 }
 
@@ -335,21 +309,8 @@ function updateCards() {
         }
         f("term").textContent = yen((it.term.cash + it.term.paypay) * it.price);
         f("total").textContent = yen((it.total.cash + it.total.paypay) * it.price);
-        f("mob").textContent = it.mobile_active ? "ON" : "OFF";
-        f("watchers").textContent = it.watchers.length ? "🛒 " + it.watchers.join(", ") : "";
-        el.classList.toggle("mobile-on", it.mobile_active);
         el.classList.toggle("has-draft", Boolean(d.cash || d.paypay));
-        el.classList.toggle("watched", it.watchers.length > 0);
     });
-}
-
-async function toggleMobile(name) {
-    try {
-        applyState(await api("/pc/api/toggle_mobile", { name }));
-        renderRegister();
-    } catch (e) {
-        alert(e.message);
-    }
 }
 
 // ---------- 未確定の入力（ドラフト） ----------
@@ -410,94 +371,8 @@ function openPcSummary() {
         applyState(await api("/pc/api/commit", { drafts }));
         ui.drafts = {};
         renderRegister();
+        refreshRegSquare();
     });
-}
-
-// ---------- モバイル注文 ----------
-let audioCtx = null;
-function beep() {
-    try {
-        audioCtx = audioCtx || new AudioContext();
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.frequency.value = 880;
-        gain.gain.value = 0.15;
-        osc.connect(gain).connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.25);
-    } catch {
-        // 音が出せない環境では点滅だけにする
-    }
-}
-
-function renderNotifications() {
-    const list = ui.state.notifications;
-    const fresh = list.filter((n) => !ui.knownNotifs.has(n.id));
-    fresh.forEach((n) => ui.knownNotifs.add(n.id));
-
-    // 最新の注文を選んでいた（または未選択）なら、新着に選択を移す
-    const wasAtEnd = ui.selected === -1 || ui.selected >= ui.notifCount - 1;
-    if (fresh.length && wasAtEnd) ui.selected = list.length - 1;
-    if (ui.selected >= list.length) ui.selected = list.length - 1;
-    ui.notifCount = list.length;
-
-    const key = list.map((n) => n.id).join(",") + "|" + ui.selected;
-    if (key !== ui.notifsKey) {
-        ui.notifsKey = key;
-        $("notify-list").innerHTML = list.map(notifHtml).join("")
-            || `<p class="notif-empty">モバイルからの注文はまだありません</p>`;
-        $("notify-list").children[ui.selected]?.scrollIntoView({ block: "nearest", inline: "nearest" });
-    }
-
-    const alerting = fresh.filter((n) => ui.state.notify_alert[n.ptype]);
-    if (alerting.length) {
-        beep();
-        for (const n of alerting) {
-            $("notify-list").children[list.indexOf(n)]?.classList.add("flash");
-        }
-    }
-}
-
-function notifHtml(n, i) {
-    const qty = n.items.reduce((a, it) => a + it.amount, 0);
-    const sum = n.items.reduce((a, it) => a + it.subtotal, 0);
-    const text = n.items.map((it) => `${it.name}×${it.amount}`).join(", ");
-    return `
-        <div class="notif ${i === ui.selected ? "selected" : ""}" data-idx="${i}">
-            <div class="notif-top"><b>${esc(n.user)}</b><time>${esc(n.timestamp)}</time></div>
-            <div class="notif-type notif-${esc(n.ptype)}">${esc(PTYPE_JP[n.ptype] || n.ptype)}・${qty}点 ${yen(sum)}</div>
-            <div class="notif-items" title="${esc(text)}">${esc(text)}</div>
-            <div class="notif-actions">
-                <button class="btn btn-small btn-ok" data-nact="approve">承認</button>
-                <button class="btn btn-small btn-ng" data-nact="cancel">取消</button>
-            </div>
-        </div>`;
-}
-
-function selectNotification(i) {
-    const len = ui.state.notifications.length;
-    if (!len) return;
-    ui.selected = Math.max(0, Math.min(len - 1, i));
-    renderNotifications();
-}
-
-function approveNotification(n) {
-    const rows = n.items.map((it) => ({ name: it.name, ptype: n.ptype, qty: it.amount, subtotal: it.subtotal }));
-    summaryModal("モバイル注文の承認", `${n.user} さんからの注文`, rows, async () => {
-        applyState(await api(`/pc/api/notifications/${encodeURIComponent(n.id)}/approve`, {}));
-        renderRegister();
-    });
-}
-
-async function cancelNotification(n) {
-    const ok = await confirmModal("注文取消し確認", `${n.user} さんの注文を破棄しますか？\n売上は計上されません。`, "破棄する", true);
-    if (!ok) return;
-    try {
-        applyState(await api(`/pc/api/notifications/${encodeURIComponent(n.id)}/cancel`, {}));
-        renderRegister();
-    } catch (e) {
-        alert(e.message);
-    }
 }
 
 // ---------- モーダル ----------
@@ -537,17 +412,16 @@ function handleModalKey(e) {
     }
 }
 
-// showKeys: ボタンに Esc / Enter のキー表示を付けるか（付けなくてもキー操作は効く）
-function confirmModal(title, message, okLabel, danger = false, { showKeys = true } = {}) {
+// ボタンにキーの表示は付けないが、Enter で OK・Esc でキャンセルが効く
+function confirmModal(title, message, okLabel, danger = false) {
     return new Promise((resolve) => {
         const done = (v) => { closeModal(); resolve(v); };
-        const key = (k) => (showKeys ? ` <kbd>${k}</kbd>` : "");
         openModal(`
             <h2>${esc(title)}</h2>
             <p class="modal-message">${esc(message)}</p>
             <div class="modal-actions">
-                <button class="btn btn-ghost" data-modal="cancel">キャンセル${key("Esc")}</button>
-                <button class="btn ${danger ? "btn-danger" : "btn-primary"}" data-modal="ok">${esc(okLabel)}${key("Enter")}</button>
+                <button class="btn btn-ghost" data-modal="cancel">キャンセル</button>
+                <button class="btn ${danger ? "btn-danger" : "btn-primary"}" data-modal="ok">${esc(okLabel)}</button>
             </div>`, { actions: { ok: () => done(true), cancel: () => done(false) } });
     });
 }
@@ -560,8 +434,8 @@ function promptModal(title, message) {
             <input class="input" data-f="input" autocomplete="off">
             <p class="error" data-f="error"></p>
             <div class="modal-actions">
-                <button class="btn btn-ghost" data-modal="cancel">キャンセル <kbd>Esc</kbd></button>
-                <button class="btn btn-primary" data-modal="ok">OK <kbd>Enter</kbd></button>
+                <button class="btn btn-ghost" data-modal="cancel">キャンセル</button>
+                <button class="btn btn-primary" data-modal="ok">OK</button>
             </div>`, {
             actions: {
                 ok: () => {
@@ -601,8 +475,8 @@ function summaryModal(title, subtitle, rows, onConfirm) {
         <div class="summary-total"><span>合計 ${qty}点</span><strong>${yen(sum)}</strong></div>
         <p class="error" data-f="error"></p>
         <div class="modal-actions">
-            <button class="btn btn-ghost" data-modal="cancel">戻る <kbd>Esc</kbd></button>
-            <button class="btn btn-primary" data-modal="ok">確定 <kbd>Enter</kbd></button>
+            <button class="btn btn-ghost" data-modal="cancel">戻る</button>
+            <button class="btn btn-primary" data-modal="ok">確定</button>
         </div>`, {
         actions: {
             ok: async () => {
@@ -650,8 +524,8 @@ function openNumpad(it, ptype) {
             ${keys.map((k) => `<button class="numpad-key" data-modal="press" data-key="${k}">${k}</button>`).join("")}
         </div>
         <div class="modal-actions">
-            <button class="btn btn-ghost" data-modal="cancel">閉じる <kbd>Esc</kbd></button>
-            <button class="btn btn-primary" data-modal="ok">追加 <kbd>Enter</kbd></button>
+            <button class="btn btn-ghost" data-modal="cancel">閉じる</button>
+            <button class="btn btn-primary" data-modal="ok">追加</button>
         </div>`, {
         actions: {
             press: (data) => press(data.key),
@@ -681,22 +555,6 @@ function openNumpad(it, ptype) {
     });
 }
 
-function openQr() {
-    const c = ui.connection;
-    const body = c.url
-        ? `<img class="qr" src="/pc/qr.png?t=${Date.now()}" alt="接続用QRコード">
-           <input class="input" readonly value="${esc(c.url)}">`
-        : `<p class="error-box">⚠ チャンネルが閉じているか、ngrok の接続に失敗しています。<br>
-           通信設定（ngrok の Authtoken）を確認してください。</p>`;
-    openModal(`
-        <h2>モバイル接続</h2>
-        <p class="modal-sub">スマホで読み取ってください</p>
-        ${body}
-        <div class="modal-actions">
-            <button class="btn btn-primary" data-modal="cancel">閉じる <kbd>Esc</kbd></button>
-        </div>`, { actions: { ok: closeModal, cancel: closeModal } });
-}
-
 // ---------- キーボード操作 ----------
 function onKeyDown(e) {
     if (e.isComposing || e.keyCode === 229) return;  // 日本語入力の変換中は無視
@@ -713,25 +571,12 @@ function onKeyDown(e) {
         F1: () => moveDrafts("cash"),
         F2: () => moveDrafts("paypay"),
         Escape: confirmExit,
-        Backspace: backspace,
-        Delete: backspace,
-        ArrowLeft: () => selectNotification(ui.selected - 1),
-        ArrowRight: () => selectNotification(ui.selected + 1),
-        " ": () => {
-            const n = ui.state.notifications[ui.selected];
-            if (n) approveNotification(n);
-        },
+        Backspace: clearDrafts,
+        Delete: clearDrafts,
     };
     if (handlers[k]) {
         e.preventDefault();
         handlers[k]();
-        return;
-    }
-
-    const mobileIdx = MOBILE_KEYS.indexOf(k);
-    if (k.length === 1 && mobileIdx !== -1) {
-        const it = ui.state.items[mobileIdx];
-        if (it) toggleMobile(it.name);
         return;
     }
 
@@ -746,16 +591,6 @@ function onKeyDown(e) {
         else addDraft(it.name, ptype, -1);
         return;
     }
-}
-
-// 未確定の入力があれば消し、なければ選択中のモバイル注文を取り消す
-function backspace() {
-    if (draftRows().length) {
-        clearDrafts();
-        return;
-    }
-    const n = ui.state.notifications[ui.selected];
-    if (n) cancelNotification(n);
 }
 
 function bindEvents() {
@@ -782,7 +617,14 @@ function bindEvents() {
     document.addEventListener("click", (e) => {
         const b = e.target.closest("[data-action]");
         if (!b) return;
-        const actions = { exit: confirmExit, "change-operator": changeOperator, commit: openPcSummary, qr: openQr };
+        const actions = {
+            exit: confirmExit,
+            "change-operator": changeOperator,
+            commit: openPcSummary,
+            "square-check": squareCheckClicked,
+            "square-retry": squareRetryClicked,
+            "square-unmatched": () => openUnmatched(),
+        };
         actions[b.dataset.action]?.();
     });
 
@@ -796,19 +638,6 @@ function bindEvents() {
         if (b.dataset.act === "add") addDraft(it.name, p, 1);
         else if (b.dataset.act === "sub") addDraft(it.name, p, -1);
         else if (b.dataset.act === "pad") openNumpad(it, p);
-        else if (b.dataset.act === "mob") toggleMobile(it.name);
-    });
-
-    $("notify-list").addEventListener("click", (e) => {
-        const el = e.target.closest(".notif");
-        if (!el) return;
-        const idx = Number(el.dataset.idx);
-        const n = ui.state.notifications[idx];
-        if (!n) return;
-        const act = e.target.closest("[data-nact]")?.dataset.nact;
-        if (act === "approve") approveNotification(n);
-        else if (act === "cancel") cancelNotification(n);
-        else selectNotification(idx);
     });
 
     $("modal-body").addEventListener("click", (e) => {

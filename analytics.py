@@ -5,15 +5,16 @@
 時間別売上・売上の推移・会計件数は current_log.csv の記録から計算する。
 
 ログでは 1 回の会計が
-    CommitOrder（PC での確定 / モバイル注文の承認）
+    CommitOrder（PC での確定）または SquareImport（Square の会計の取り込み）
     Add / Sub（商品ごとの増減。Location が期間名）
-の順に書かれるので、CommitOrder の直後に続く Add/Sub をまとめて 1 件として数える。
+の順に書かれるので、その直後に続く Add/Sub をまとめて 1 件として数える。
 """
 import csv
 from collections import defaultdict
 from datetime import datetime
 
 COUNT_ACTIONS = ("Add", "Sub", "加算", "減算")
+COMMIT_ACTIONS = ("CommitOrder", "SquareImport")
 DEFAULT_HOURS = (9, 17)   # データが少なくてもこの時間帯は表示する
 MAX_TREND_POINTS = 80
 MIX_MAX_ITEMS = 5         # これより多い商品は「その他」にまとめる
@@ -30,6 +31,7 @@ def build(dm, term=None, current_mode=None):
         return {"terms": [], "term": None}
 
     sales, mix = _term_sales(dm, term, prices)
+    pay = _pay_split(dm, term, prices)
     hourly, trend, transactions = _scan_log(dm.log_path, term, prices)
 
     idx = terms.index(term)
@@ -53,6 +55,7 @@ def build(dm, term=None, current_mode=None):
         "hourly": hourly,
         "peak": peak,
         "mix": mix,
+        "pay": pay,
         "trend": trend,
     }
 
@@ -92,6 +95,15 @@ def _term_sales(dm, term, prices):
     return total, rows
 
 
+def _pay_split(dm, term, prices):
+    """レジに記録した売上を、現金と Square の枠に分けた金額"""
+    counts = dm.load_csv_data(f"{term}.csv")
+    return {
+        "cash": sum(c["cash"] * prices.get(name, 0) for name, c in counts.items()),
+        "square": sum(c["paypay"] * prices.get(name, 0) for name, c in counts.items()),
+    }
+
+
 def _scan_log(log_path, term, prices):
     hourly = defaultdict(int)
     points = []          # (時刻, 累計売上)
@@ -117,7 +129,7 @@ def _scan_log(log_path, term, prices):
 
                 if action not in COUNT_ACTIONS:
                     close_commit()
-                    if action == "CommitOrder":
+                    if action in COMMIT_ACTIONS:
                         commit = {"loc": None, "qty": 0}
                     continue
 
