@@ -33,7 +33,8 @@ def build(dm, term=None, current_mode=None):
 
     sales, mix = _term_sales(dm, term, amounts)
     pay = _pay_split(amounts, term)
-    hourly, trend, transactions = _scan_log(dm.log_path, term, prices, open_hours(settings, term))
+    hours = open_hours(settings, term)
+    hourly, trend, transactions = _scan_log(dm.log_path, term, prices, hours)
 
     idx = terms.index(term)
     prev_term = terms[idx - 1] if idx > 0 else None
@@ -54,6 +55,7 @@ def build(dm, term=None, current_mode=None):
         "prev_term": prev_term,
         "change": change,
         "hourly": hourly,
+        "open": {"start": hours[0], "end": hours[1]},   # 営業時間（時間別売上の見出しに出す）
         "peak": peak,
         "mix": mix,
         "pay": pay,
