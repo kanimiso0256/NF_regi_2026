@@ -8,6 +8,7 @@ const PTYPES = ["cash", "pp", "paypay"];
 const PTYPE_JP = { cash: "現金", pp: "PayPay", paypay: "Square" };
 const emptyDraft = () => ({ cash: 0, pp: 0, paypay: 0 });
 const POLL_MS = 1000;
+const OFFLINE_AFTER = 3;   // 続けてこの回数（1 秒ごと）つながらなければ「つながっていません」を出す
 
 const ui = {
     view: null,
@@ -15,6 +16,7 @@ const ui = {
     drafts: {},         // 商品名 → { cash, pp, paypay }（未確定の入力）
     modal: null,        // 開いているモーダル { actions, onKey }
     cardsKey: "",       // 商品の並びが変わったときだけカードを作り直すための目印
+    failures: 0,        // 状態の取得に続けて失敗した回数（親機につながらない）
 };
 
 const $ = (id) => document.getElementById(id);
@@ -33,7 +35,9 @@ async function api(path, body) {
     try {
         res = await fetch(path, opts);
     } catch {
-        throw new Error("サーバーに接続できません。web_main.py が起動しているか確認してください。");
+        const err = new Error(offlineMessage());
+        err.offline = true;
+        throw err;
     }
     const data = await res.json().catch(() => ({}));
     if (res.status === 401 && data.login) {
@@ -42,6 +46,32 @@ async function api(path, body) {
     }
     if (!res.ok) throw new Error(data.error || `エラーが発生しました (${res.status})`);
     return data;
+}
+
+// ---------- 親機につながらないとき ----------
+// 親機そのものでは「サーバー（黒いウィンドウ）が止まった」、子機では「親機に届かない」
+function offlineMessage() {
+    return ui.state?.is_local
+        ? "レジが止まっています。「レジ起動（親機）.bat」で起動し直してください。"
+        : "親機につながっていません。親機のレジ（黒いウィンドウ）と、Wi-Fi・Tailscale を確認してください。";
+}
+
+// 1 秒ごとの状態の取得の成否から、画面の上に「つながっていません」の帯を出し入れする
+function markConnection(ok) {
+    const banner = $("offline-banner");
+    if (ok) {
+        if (ui.failures >= OFFLINE_AFTER) {
+            banner.hidden = true;
+            showToast("親機につながりました");
+        }
+        ui.failures = 0;
+        return;
+    }
+    ui.failures++;
+    if (ui.failures >= OFFLINE_AFTER) {
+        banner.textContent = offlineMessage() + "　つながるまで確定できません（入力は消えません）";
+        banner.hidden = false;
+    }
 }
 
 // ---------- 画面切り替え ----------
@@ -94,7 +124,9 @@ async function poll() {
     if (!ui.state?.logged_in) return;
     try {
         applyState(await api("/pc/api/state"));
-    } catch {
+        markConnection(true);
+    } catch (e) {
+        if (e.offline) markConnection(false);
         return;
     }
     if (ui.view !== "register") return;

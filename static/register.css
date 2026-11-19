@@ -581,6 +581,24 @@ kbd {
 .sq-check-field .muted { display: block; font-size: 13px; line-height: 1.7; }
 .sq-check-field b { color: var(--ink); font-weight: 500; }
 
+/* 親機につながらないときの帯。画面の一番上に重ねて出す（確認画面より前に） */
+.offline-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 200;
+    padding: 12px 20px;
+    background: #c62828;
+    color: #fff;
+    font-family: var(--font-ui);
+    font-size: 15px;
+    font-weight: 500;
+    text-align: center;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .2);
+}
+.offline-banner[hidden] { display: none; }
+
 /* 画面下に数秒だけ出るお知らせ（Square から取り込んだときなど） */
 .toast {
     position: fixed;
