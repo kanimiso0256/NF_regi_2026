@@ -15,7 +15,7 @@ from collections import defaultdict
 import sales_log
 
 COMMIT_ACTIONS = ("CommitOrder", "SquareImport")
-DEFAULT_HOURS = (9, 17)   # データが少なくてもこの時間帯は表示する
+DEFAULT_OPEN = ("09:00", "18:00")   # 営業時間が設定されていない期間の時間帯（時間別売上はこの範囲を必ず表示する）
 MAX_TREND_POINTS = 80
 MIX_MAX_ITEMS = 5         # これより多い商品は「その他」にまとめる
 
@@ -33,7 +33,7 @@ def build(dm, term=None, current_mode=None):
 
     sales, mix = _term_sales(dm, term, amounts)
     pay = _pay_split(amounts, term)
-    hourly, trend, transactions = _scan_log(dm.log_path, term, prices)
+    hourly, trend, transactions = _scan_log(dm.log_path, term, prices, open_hours(settings, term))
 
     idx = terms.index(term)
     prev_term = terms[idx - 1] if idx > 0 else None
@@ -107,7 +107,21 @@ def _pay_split(amounts, term):
     }
 
 
-def _scan_log(log_path, term, prices):
+def open_hours(settings, term):
+    """期間の営業時間 ("HH:MM", "HH:MM")。設定されていなければ DEFAULT_OPEN"""
+    h = (settings.get("hours") or {}).get(term) or {}
+    return (h.get("start") or DEFAULT_OPEN[0], h.get("end") or DEFAULT_OPEN[1])
+
+
+def _hour_range(start, end):
+    """営業時間に含まれる「何時台」の範囲（18:20〜21:00 なら 18〜20 時台）"""
+    sh, _ = map(int, start.split(":"))
+    eh, em = map(int, end.split(":"))
+    last = eh if em else eh - 1
+    return sh, max(sh, last)
+
+
+def _scan_log(log_path, term, prices, hours=DEFAULT_OPEN):
     hourly = defaultdict(int)
     points = []          # (時刻, 累計売上)
     running = 0
@@ -153,7 +167,7 @@ def _scan_log(log_path, term, prices):
         points.append((dt, running))
     close_commit()
 
-    hours = list(hourly) + list(DEFAULT_HOURS)
+    hours = list(hourly) + list(_hour_range(*hours))
     hourly_list = [{"hour": h, "amount": hourly.get(h, 0)} for h in range(min(hours), max(hours) + 1)]
     return hourly_list, _downsample(points), transactions
 
