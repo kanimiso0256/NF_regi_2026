@@ -342,7 +342,7 @@ class DataManager:
                 except: pass
         settings = self.load_settings()
         terms = settings.get("terms", []) + ["調整"]
-        restored_data = defaultdict(lambda: defaultdict(lambda: {'cash': 0, 'paypay': 0}))
+        restored_data = defaultdict(lambda: defaultdict(lambda: {'cash': 0, 'paypay': 0, 'pp': 0}))
         try:
             with open(target_log_path, 'r', encoding='utf-8') as f:
                 reader = csv.reader(f); header = next(reader, None) 
@@ -368,7 +368,7 @@ class DataManager:
                         # ★修正: Valueはすでに符号付きなのでActionによる反転は削除
                         # if action in ["減算", "Sub"]: delta *= -1
                         
-                        if ptype in ['cash', 'paypay']: restored_data[loc][name_part][ptype] += delta
+                        if ptype in ['cash', 'paypay', 'pp']: restored_data[loc][name_part][ptype] += delta
                     except ValueError: continue 
                     
             for t in terms: self.reset_csv_data(f"{t}.csv")
@@ -379,7 +379,7 @@ class DataManager:
                 with open(path, 'w', encoding='utf-8', newline='') as f:
                     writer = csv.writer(f)
                     for name, counts in term_items.items():
-                        writer.writerow([name, counts['cash'], counts['paypay']])
+                        writer.writerow([name, counts['cash'], counts['paypay'], counts['pp']])
             if target_log_path != self.log_path: shutil.copy2(target_log_path, self.log_path)
             self.log_action(admin_name, "Admin", "System Restore", "All Data", f"Restored from {os.path.basename(target_log_path)}")
             return True, "復元が完了しました。"
@@ -390,7 +390,7 @@ class DataManager:
         if not os.path.exists(log_path): return False, "❌ ログファイルが見つかりません。"
         settings = self.load_settings()
         terms = settings.get("terms", []) + ["調整"]
-        calculated_data = defaultdict(lambda: defaultdict(lambda: {'cash': 0, 'paypay': 0}))
+        calculated_data = defaultdict(lambda: defaultdict(lambda: {'cash': 0, 'paypay': 0, 'pp': 0}))
         try:
             with open(log_path, 'r', encoding='utf-8') as f:
                 reader = csv.reader(f); next(reader, None)
@@ -422,7 +422,7 @@ class DataManager:
                                 
                                 # Action(Sub)による反転は行わない (Valueの符号を正とする)
                                 
-                                if ptype in ['cash', 'paypay']:
+                                if ptype in ['cash', 'paypay', 'pp']:
                                     calculated_data[loc][name_part][ptype] += delta
                             except:
                                 continue
@@ -442,6 +442,10 @@ class DataManager:
                     errors.append(f"[{t}] {name}(Cash): CSV={csv_cash}, Log={log_cash}")
                 if csv_pay != log_pay:
                     errors.append(f"[{t}] {name}(Square): CSV={csv_pay}, Log={log_pay}")
+                csv_pp = csv_data[name]['pp']
+                log_pp = calculated_data[t][name]['pp']
+                if csv_pp != log_pp:
+                    errors.append(f"[{t}] {name}(PayPay): CSV={csv_pp}, Log={log_pp}")
                     
         if errors:
             error_msg = "❌ データの不整合が検出されました:\n" + "\n".join(errors[:10])
@@ -452,7 +456,8 @@ class DataManager:
 
     def load_csv_data(self, filename):
         path = os.path.join(self.data_dir, filename)
-        data = defaultdict(lambda: {'cash': 0, 'paypay': 0})
+        # 列: 商品名, 現金, Square（キーは過去の CSV と合わせて paypay）, PayPay（手入力。キーは pp）
+        data = defaultdict(lambda: {'cash': 0, 'paypay': 0, 'pp': 0})
         if os.path.exists(path):
             try:
                 with open(path, 'r', encoding='utf-8') as f:
@@ -461,6 +466,8 @@ class DataManager:
                         if len(row) >= 3:
                             data[row[0]]['cash'] = int(row[1])
                             data[row[0]]['paypay'] = int(row[2])
+                        if len(row) >= 4:
+                            data[row[0]]['pp'] = int(row[3])
             except: pass
         return data
 
@@ -470,7 +477,8 @@ class DataManager:
             with open(path, 'w', encoding='utf-8', newline='') as f:
                 writer = csv.writer(f)
                 for item in items:
-                    writer.writerow([item.name, item.counts['term']['cash'], item.counts['term']['paypay']])
+                    c = item.counts['term']
+                    writer.writerow([item.name, c['cash'], c['paypay'], c.get('pp', 0)])
         except: pass
 
     def reset_csv_data(self, filename):

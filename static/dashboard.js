@@ -194,12 +194,12 @@ function payRows() {
     const d = dash.data;
     const r = sq.dashData?.term === d.term ? sq.dashData : null;
     const fromSquare = r && r.configured && !r.error && Object.keys(r.methods || {}).length > 0;
-    let rows = [{ name: "現金", amount: d.pay.cash }];
-    if (fromSquare) {
-        rows.push(...Object.entries(r.methods).map(([name, amount]) => ({ name, amount })));
-    } else {
-        rows.push({ name: "Square", amount: d.pay.square });
-    }
+    // 現金と PayPay（手入力）はレジの記録、Square の分は取れれば Square の決済の内訳（取れなければレジの記録）
+    const sums = new Map([["現金", d.pay.cash], ["PayPay", d.pay.paypay || 0]]);
+    const add = (name, amount) => sums.set(name, (sums.get(name) || 0) + amount);
+    if (fromSquare) Object.entries(r.methods).forEach(([name, amount]) => add(name, amount));
+    else add("Square", d.pay.square);
+    let rows = [...sums].map(([name, amount]) => ({ name, amount }));
     rows = rows.filter((x) => x.amount > 0).sort((a, b) => b.amount - a.amount);
     if (rows.length > PAY_MAX_ROWS) {
         const rest = rows.slice(PAY_MAX_ROWS - 1);

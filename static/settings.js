@@ -12,6 +12,8 @@ const settings = {
     sq: null,
     // 子機の接続 { lan, urls, passcode, terminals, input（入力中のパスワード）, msg }
     lan: null,
+    // ダッシュボードの共有 { url, enabled, status: {state, message, sent_at}, msg }
+    share: null,
 };
 
 const LAN_POLL_MS = 10000;   // 接続中の端末の一覧を更新する間隔
@@ -49,7 +51,7 @@ async function openSettings() {
     }
     try {
         loadSettingsModel(await adminApi("/pc/api/admin/settings"));
-        await Promise.all([loadSquareSettings(), loadLanSettings()]);
+        await Promise.all([loadSquareSettings(), loadLanSettings(), loadShareSettings()]);
     } catch (e) {
         $("admin-error").textContent = e.message;
     }
@@ -61,6 +63,7 @@ function lockSettings() {
     settings.dirty = false;
     settings.sq = null;
     settings.lan = null;
+    settings.share = null;
     $("settings-body").hidden = true;
     $("settings-body").innerHTML = "";
     $("settings-lock").hidden = false;
@@ -75,7 +78,7 @@ async function adminLogin() {
         settings.token = token;
         $("admin-pass").value = "";
         loadSettingsModel(await adminApi("/pc/api/admin/settings"));
-        await Promise.all([loadSquareSettings(), loadLanSettings()]);
+        await Promise.all([loadSquareSettings(), loadLanSettings(), loadShareSettings()]);
     } catch (e) {
         $("admin-error").textContent = e.message;
     }
@@ -161,6 +164,8 @@ function renderSettings(message = "") {
             <article class="panel lan-settings" id="lan-panel">${lanPanelHtml()}</article>
 
             <article class="panel sq-settings" id="sq-panel">${squarePanelHtml()}</article>
+
+            <article class="panel sq-settings" id="share-panel">${sharePanelHtml()}</article>
         </div>`;
 }
 
@@ -360,6 +365,79 @@ async function squareClearToken() {
     if (ok) squareSave({ clear_token: true });
 }
 
+// ---------- ダッシュボードの共有（Google スプレッドシート） ----------
+async function loadShareSettings() {
+    const s = await adminApi("/pc/api/admin/share");
+    settings.share = { ...s, msg: settings.share?.msg || "" };
+    renderSharePanel();
+}
+
+function renderSharePanel() {
+    const el = $("share-panel");
+    if (el) el.innerHTML = sharePanelHtml();
+}
+
+function shareStatusText(s) {
+    if (!s) return "";
+    if (s.state === "error") return `<span class="sq-error">${esc(s.message)}</span>`;
+    if (s.sent_at) return `最後に送った時刻：${esc(s.sent_at)}`;
+    return "";
+}
+
+function sharePanelHtml() {
+    const q = settings.share;
+    const head = `
+        <p class="eyebrow">SHARE</p>
+        <h3 class="panel-title">ダッシュボードの共有</h3>`;
+    if (!q) return head + `<p class="muted">読み込み中…</p>`;
+    return head + `
+        <p class="muted sq-help">
+            売上を Google スプレッドシートに 1 分ごとに送ります。スプレッドシートを共有すれば、VPN なしでみんなが見られます。
+            スプレッドシートに Apps Script（share/dashboard_sheet.gs）を付けて「ウェブアプリ」として公開し、その URL を入れてください。
+        </p>
+        <label class="sq-field">
+            <span class="kpi-label">ウェブアプリの URL</span>
+            <input class="field" data-share="url" autocomplete="off" spellcheck="false" value="${esc(q.url)}"
+                placeholder="https://script.google.com/macros/s/…/exec">
+        </label>
+        <label class="sq-check-field">
+            <input type="checkbox" data-share="enabled" ${q.enabled ? "checked" : ""}>
+            <span><strong>スプレッドシートに売上を送る</strong></span>
+        </label>
+        <div class="sq-actions">
+            <button class="btn btn-ghost" data-set="share-send">今すぐ送る</button>
+            <button class="btn btn-primary" data-set="share-save">共有の設定を保存</button>
+            <span class="muted lan-help">${shareStatusText(q.status)}</span>
+        </div>
+        <p class="settings-msg sq-msg">${esc(q.msg)}</p>`;
+}
+
+async function saveShareSettings() {
+    const q = settings.share;
+    try {
+        const s = await adminApi("/pc/api/admin/share", { url: q.url, enabled: q.enabled });
+        settings.share = { ...s, msg: "保存しました" };
+    } catch (e) {
+        q.msg = e.message;
+    }
+    renderSharePanel();
+}
+
+async function sendShareNow() {
+    const q = settings.share;
+    q.msg = "送っています…";
+    renderSharePanel();
+    try {
+        // 入力中の URL で試せるよう、先に保存する
+        await adminApi("/pc/api/admin/share", { url: q.url, enabled: q.enabled });
+        const s = await adminApi("/pc/api/admin/share/send", {});
+        settings.share = { ...s, msg: s.status.state === "ok" ? "送りました" : "" };
+    } catch (e) {
+        q.msg = e.message;
+    }
+    renderSharePanel();
+}
+
 function markDirty() {
     settings.dirty = true;
     const msg = $("settings-msg");
@@ -370,6 +448,10 @@ function onSettingsInput(e) {
     const el = e.target;
     if (el.dataset.lan && settings.lan) {
         settings.lan[el.dataset.lan] = el.value;
+        return;
+    }
+    if (el.dataset.share && settings.share) {
+        settings.share[el.dataset.share] = el.type === "checkbox" ? el.checked : el.value;
         return;
     }
     if (el.dataset.sq && settings.sq) {
@@ -396,6 +478,8 @@ function onSettingsClick(e) {
         case "lan-save": saveLanSettings(); return;
         case "sq-save": squareSave(); return;
         case "sq-clear": squareClearToken(); return;
+        case "share-save": saveShareSettings(); return;
+        case "share-send": sendShareNow(); return;
         case "lock": confirmLeaveSettings().then((ok) => ok && lockSettings()); return;
         case "add":
             list.push(b.dataset.list === "terms"

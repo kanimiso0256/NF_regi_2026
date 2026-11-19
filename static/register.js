@@ -3,14 +3,16 @@
 // ダッシュボードは dashboard.js、設定画面は settings.js。
 "use strict";
 
-const PTYPES = ["cash", "paypay"];
-const PTYPE_JP = { cash: "現金", paypay: "Square" };   // キーは過去の CSV と合わせて "paypay" のまま
+// "paypay" は Square の枠（過去の CSV と合わせた名前）。"pp" は Square を通さずに受けて手で入力する PayPay
+const PTYPES = ["cash", "pp", "paypay"];
+const PTYPE_JP = { cash: "現金", pp: "PayPay", paypay: "Square" };
+const emptyDraft = () => ({ cash: 0, pp: 0, paypay: 0 });
 const POLL_MS = 1000;
 
 const ui = {
     view: null,
     state: null,        // サーバーから受け取った最新の状態
-    drafts: {},         // 商品名 → { cash, paypay }（未確定の入力）
+    drafts: {},         // 商品名 → { cash, pp, paypay }（未確定の入力）
     modal: null,        // 開いているモーダル { actions, onKey }
     cardsKey: "",       // 商品の並びが変わったときだけカードを作り直すための目印
 };
@@ -320,7 +322,7 @@ function cardHtml(it) {
                 <div><span>Term</span><b data-f="term">¥0</b></div>
                 <div><span>総合</span><b data-f="total">¥0</b></div>
             </div>
-            <div class="pay-rows">${row("cash", k.slice(0, 3))}${row("paypay", k.slice(3, 6))}</div>
+            <div class="pay-rows">${row("cash", k.slice(0, 3))}${row("pp", ["", "", ""])}${row("paypay", k.slice(3, 6))}</div>
         </article>`;
 }
 
@@ -340,9 +342,9 @@ function updateCards() {
         const el = cards[i];
         if (!el) return;
         const f = (name) => el.querySelector(`[data-f="${name}"]`);
-        const d = ui.drafts[it.name] || { cash: 0, paypay: 0 };
+        const d = ui.drafts[it.name] || emptyDraft();
         for (const p of PTYPES) {
-            f(`count-${p}`).textContent = it.term[p];
+            f(`count-${p}`).textContent = it.term[p] || 0;
             const badge = f(`draft-${p}`);
             badge.textContent = d[p] > 0 ? `+${d[p]}` : d[p] < 0 ? String(d[p]) : "";
             badge.className = "pay-draft" + (d[p] > 0 ? " pos" : d[p] < 0 ? " neg" : "");
@@ -350,7 +352,7 @@ function updateCards() {
         // 売上の金額はサーバーが記録した金額（売れたときの値段）。今の値段 × 個数ではない
         f("term").textContent = yen(it.amount.term);
         f("total").textContent = yen(it.amount.total);
-        el.classList.toggle("has-draft", Boolean(d.cash || d.paypay));
+        el.classList.toggle("has-draft", PTYPES.some((p) => d[p]));
 
         const sqRow = el.querySelector(".pay-paypay");
         sqRow.classList.toggle("locked", locked);
@@ -363,18 +365,17 @@ function updateCards() {
 function addDraft(name, ptype, amount) {
     const item = ui.state.items.find((it) => it.name === name);
     if (!item) return;
-    const d = ui.drafts[name] || (ui.drafts[name] = { cash: 0, paypay: 0 });
+    const d = ui.drafts[name] || (ui.drafts[name] = emptyDraft());
     const next = d[ptype] + amount;
-    if (!ui.state.allow_negative && item.term[ptype] + next < 0) return;
+    if (!ui.state.allow_negative && (item.term[ptype] || 0) + next < 0) return;
     d[ptype] = next;
     refreshDrafts();
 }
 
 function moveDrafts(target) {
     for (const d of Object.values(ui.drafts)) {
-        const sum = d.cash + d.paypay;
-        d.cash = target === "cash" ? sum : 0;
-        d.paypay = target === "paypay" ? sum : 0;
+        const sum = PTYPES.reduce((a, p) => a + d[p], 0);
+        for (const p of PTYPES) d[p] = p === target ? sum : 0;
     }
     refreshDrafts();
 }
@@ -616,6 +617,7 @@ function onKeyDown(e) {
         Enter: openPcSummary,
         F1: () => moveDrafts("cash"),
         F2: () => (squareLocked() ? showToast(SQUARE_LOCKED_MSG) : moveDrafts("paypay")),
+        F3: () => moveDrafts("pp"),
         Escape: confirmExit,
         Backspace: clearDrafts,
         Delete: clearDrafts,

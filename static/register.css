@@ -18,8 +18,10 @@
     --cash: #2e7d32;
     --cash-bg: #e8f5e9;
     --cash-btn: #a5d6a7;
-    --pay: #c62828;
-    --pay-bg: #ffebee;
+    --pay: #5b7ba6;          /* Square */
+    --pay-bg: #eef2f8;
+    --pp: #e60033;           /* PayPay（手入力） */
+    --pp-bg: #ffebee;
     --pay-btn: #ef9a9a;
 
     --draft-pos: #1976d2;
@@ -728,7 +730,7 @@ kbd {
 .card-stats span { display: block; color: var(--label); font-size: 10px; }
 .card-stats b { color: var(--ink); font-weight: 500; }
 
-/* 現金・Square の 2 段。ボタンは残りの高さいっぱいに伸びる */
+/* 現金・PayPay・Square の 3 段。ボタンは残りの高さいっぱいに伸びる */
 .pay-rows { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .pay-row {
     flex: 1;
@@ -744,6 +746,7 @@ kbd {
 .pay-title::before { content: ""; width: 3px; height: 14px; }
 .pay-cash .pay-title::before { background: var(--cash); }
 .pay-paypay .pay-title::before { background: var(--pay); }
+.pay-pp .pay-title::before { background: var(--pp); }
 .pay-num { display: flex; align-items: baseline; justify-content: flex-end; gap: 4px; }
 .pay-count { color: var(--ink); font-size: clamp(22px, 3.4vh, 30px); font-weight: 300; line-height: 1; }
 .pay-draft { font-size: 13px; font-weight: 500; }
@@ -844,6 +847,7 @@ kbd {
 }
 .numpad-cash { background: var(--cash-bg); color: var(--cash); }
 .numpad-paypay { background: var(--pay-bg); color: var(--pay); }
+.numpad-pp { background: var(--pp-bg); color: var(--pp); }
 .numpad-head strong { font-size: 18px; color: var(--text); }
 .numpad-head small { color: var(--text-sub); }
 .numpad-display { padding: 16px 0; text-align: right; }
