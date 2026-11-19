@@ -977,3 +977,7 @@ kbd {
     .toast { bottom: 150px; max-width: calc(100% - 32px); text-align: center; }
     .offline-banner { padding: 10px 12px; font-size: 13px; }
 }
+
+/* 設定：期間の営業時間（開始〜終了） */
+.edit-table .hours { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.edit-table .hours .field { width: auto; min-width: 96px; }

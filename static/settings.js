@@ -87,7 +87,10 @@ async function adminLogin() {
 function loadSettingsModel(s) {
     const active = new Set(s.active_terms);
     settings.model = {
-        terms: s.terms.map((t) => ({ name: t, active: active.has(t), target: s.targets[t] || 0 })),
+        terms: s.terms.map((t) => ({
+            name: t, active: active.has(t), target: s.targets[t] || 0,
+            start: s.hours?.[t]?.start || "09:00", end: s.hours?.[t]?.end || "18:00",
+        })),
         specials: s.special_terms.map((t) => ({ name: t, active: active.has(t) })),
         menu: s.menu.map((m) => ({ ...m })),
     };
@@ -110,12 +113,18 @@ function renderSettings(message = "") {
             <td><input class="field" data-list="terms" data-i="${i}" data-k="name" value="${esc(t.name)}"></td>
             <td class="center"><input type="checkbox" data-list="terms" data-i="${i}" data-k="active" ${t.active ? "checked" : ""}></td>
             <td><input class="field num" type="number" min="0" step="1000" data-list="terms" data-i="${i}" data-k="target" value="${t.target}"></td>
+            <td class="hours">
+                <input class="field" type="time" data-list="terms" data-i="${i}" data-k="start" value="${esc(t.start)}">
+                <span>〜</span>
+                <input class="field" type="time" data-list="terms" data-i="${i}" data-k="end" value="${esc(t.end)}">
+            </td>
             <td class="row-actions">${moveBtns("terms", i)}</td>
         </tr>`).join("");
     const specialRows = m.specials.map((t, i) => `
         <tr class="special">
             <td>${esc(t.name)}</td>
             <td class="center"><input type="checkbox" data-list="specials" data-i="${i}" data-k="active" ${t.active ? "checked" : ""}></td>
+            <td class="muted">—</td>
             <td class="muted">—</td>
             <td></td>
         </tr>`).join("");
@@ -145,7 +154,7 @@ function renderSettings(message = "") {
                 <p class="eyebrow">TERMS</p>
                 <h3 class="panel-title">期間と目標金額</h3>
                 <table class="edit-table">
-                    <thead><tr><th>期間名</th><th class="center">レジで選択可</th><th>目標金額（円）</th><th></th></tr></thead>
+                    <thead><tr><th>期間名</th><th class="center">レジで選択可</th><th>目標金額（円）</th><th>営業時間</th><th></th></tr></thead>
                     <tbody>${termRows}${specialRows}</tbody>
                 </table>
                 <button class="btn btn-ghost btn-small" data-set="add" data-list="terms">＋ 期間を追加</button>
@@ -483,7 +492,7 @@ function onSettingsClick(e) {
         case "lock": confirmLeaveSettings().then((ok) => ok && lockSettings()); return;
         case "add":
             list.push(b.dataset.list === "terms"
-                ? { name: "", active: true, target: 0 }
+                ? { name: "", active: true, target: 0, start: "09:00", end: "18:00" }
                 : { name: "", price: 0, visible: true });
             break;
         case "remove": list.splice(i, 1); break;
@@ -505,6 +514,7 @@ async function saveSettings() {
         terms: m.terms.map((t) => t.name.trim()),
         active_terms: [...m.terms, ...m.specials].filter((t) => t.active).map((t) => t.name.trim()),
         targets: Object.fromEntries(m.terms.map((t) => [t.name.trim(), t.target])),
+        hours: Object.fromEntries(m.terms.map((t) => [t.name.trim(), { start: t.start, end: t.end }])),
         menu: m.menu,
     };
     try {

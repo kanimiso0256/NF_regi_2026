@@ -19,6 +19,7 @@ import time
 from datetime import date, datetime
 from types import SimpleNamespace
 
+import analytics
 import sales_log
 from square_api import API_BASE, SquareClient, SquareError, SquareReconciler, load_config, order_lines
 
@@ -190,6 +191,7 @@ class RegisterState:
             "special_terms": list(SPECIAL_TERMS),
             "active_terms": settings.get("active_terms", []),
             "targets": {x: int(targets.get(x, 0) or 0) for x in terms},
+            "hours": {x: dict(zip(("start", "end"), analytics.open_hours(settings, x))) for x in terms},
             "operating": operating,
         }
 
@@ -213,6 +215,7 @@ class RegisterState:
         self._check_names([m["name"] for m in menu], "商品名")
 
         targets = {x: self._to_int((data.get("targets") or {}).get(x), "目標金額") for x in terms}
+        hours = {x: self._check_hours(x, (data.get("hours") or {}).get(x)) for x in terms}
         selectable = set(terms) | set(SPECIAL_TERMS)
         active = [x for x in data.get("active_terms") or [] if x in selectable]
 
@@ -222,6 +225,7 @@ class RegisterState:
                 "terms": terms,
                 "menu": menu,
                 "targets": targets,
+                "hours": hours,
                 "active_terms": active,
             })
             self.dm.save_settings_file(settings)
@@ -478,6 +482,19 @@ class RegisterState:
             if n in seen:
                 raise RegisterError(f"{label}「{n}」が重複しています")
             seen.add(n)
+
+    @staticmethod
+    def _check_hours(term, h):
+        """期間の営業時間 {"start": "HH:MM", "end": "HH:MM"}（時間別売上のグラフの範囲に使う）"""
+        h = h or {}
+        start = str(h.get("start") or analytics.DEFAULT_OPEN[0])
+        end = str(h.get("end") or analytics.DEFAULT_OPEN[1])
+        for v in (start, end):
+            if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d|24:00", v):
+                raise RegisterError(f"「{term}」の営業時間は 18:20 のように入力してください")
+        if start >= end:
+            raise RegisterError(f"「{term}」の営業時間は、終わりを始まりより後にしてください")
+        return {"start": start, "end": end}
 
     @staticmethod
     def _to_int(value, label):
