@@ -28,7 +28,7 @@ async function adminApi(path, body) {
     try {
         res = await fetch(path, opts);
     } catch {
-        throw new Error("サーバーに接続できません。web_main.py が起動しているか確認してください。");
+        throw new Error(offlineMessage());
     }
     const data = await res.json().catch(() => ({}));
     if (res.status === 401 && data.login) {
