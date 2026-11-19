@@ -215,7 +215,9 @@ class RegisterState:
         self._check_names([m["name"] for m in menu], "商品名")
 
         targets = {x: self._to_int((data.get("targets") or {}).get(x), "目標金額") for x in terms}
-        hours = {x: self._check_hours(x, (data.get("hours") or {}).get(x)) for x in terms}
+        # 営業時間が送られてこなかった期間は、保存済みの時間のまま（古い画面から保存したときに初期値へ戻さない）
+        saved_hours = self.dm.load_settings().get("hours") or {}
+        hours = {x: self._check_hours(x, (data.get("hours") or {}).get(x) or saved_hours.get(x)) for x in terms}
         selectable = set(terms) | set(SPECIAL_TERMS)
         active = [x for x in data.get("active_terms") or [] if x in selectable]
 

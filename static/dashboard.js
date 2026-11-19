@@ -63,7 +63,8 @@ function renderDashboard(d) {
         || `<span class="tab-empty">Settings で期間を登録してください</span>`;
     if (!d.term) return;
 
-    // 時間別売上
+    // 時間別売上（見出しの横に、その期間の営業時間）
+    $("open-hours").textContent = d.open ? `営業時間 ${d.open.start}〜${d.open.end}` : "";
     $("peak-hour").textContent = d.peak ? `${d.peak.hour}:00` : "—";
     $("peak-amount").textContent = d.peak ? yenJp(d.peak.amount) : "—";
     $("hourly-chart").innerHTML = lineChart(d.hourly, $("hourly-chart"));
