@@ -34,6 +34,10 @@ async function api(path, body) {
         throw new Error("サーバーに接続できません。web_main.py が起動しているか確認してください。");
     }
     const data = await res.json().catch(() => ({}));
+    if (res.status === 401 && data.login) {
+        // ログインが切れた（親機でパスワードが変わった・ログアウトしたなど）
+        showLogin(data.need_passcode);
+    }
     if (!res.ok) throw new Error(data.error || `エラーが発生しました (${res.status})`);
     return data;
 }
@@ -74,8 +78,7 @@ async function init() {
         return;
     }
     if (!ui.state.logged_in) {
-        showView("login");
-        $("login-name").focus();
+        showLogin(ui.state.need_passcode);
     } else if (ui.state.active) {
         enterRegister(true);
     } else {
@@ -105,6 +108,18 @@ async function poll() {
 }
 
 // ---------- ログイン ----------
+// needPasscode: 子機のときはパスワードの欄も出す（親機では出さない）
+function showLogin(needPasscode = ui.loginNeedsPasscode) {
+    if (needPasscode !== undefined) ui.loginNeedsPasscode = needPasscode;
+    ui.state = { logged_in: false };
+    ui.drafts = {};
+    closeModal();
+    lockSettings();
+    $("login-pass-row").hidden = !ui.loginNeedsPasscode;
+    showView("login");
+    $("login-name").focus();
+}
+
 async function doLogin() {
     const name = $("login-name").value.trim();
     if (!name) {
@@ -112,10 +127,25 @@ async function doLogin() {
         return;
     }
     try {
-        applyState(await api("/pc/api/login", { name }));
+        applyState(await api("/pc/api/login", { name, passcode: $("login-pass").value }));
+        $("login-pass").value = "";
+        $("login-error").textContent = "";
         await openDashboard();
     } catch (e) {
         $("login-error").textContent = e.message;
+    }
+}
+
+async function logout() {
+    const msg = ui.state.active
+        ? "この端末をログアウトしますか？\n販売中の期間は終了し、未確定の入力は削除されます"
+        : "この端末をログアウトしますか？";
+    if (!(await confirmModal("ログアウト", msg, "ログアウト"))) return;
+    try {
+        const r = await api("/pc/api/logout", {});
+        showLogin(r.need_passcode);
+    } catch (e) {
+        alert(e.message);
     }
 }
 
@@ -294,8 +324,18 @@ function cardHtml(it) {
         </article>`;
 }
 
+// Square の自動取り込みが働く期間（テスト・調整以外）では、Square の段の ＋・－ は使えない。
+// 手で押すと取り込み分と二重に数えてしまうため。直すときだけテンキー（⌨）から入力する
+function squareLocked() {
+    const s = ui.state;
+    return Boolean(s?.square && s.square.state !== "off" && !s.is_test && !s.allow_negative);
+}
+
+const SQUARE_LOCKED_MSG = "Square の個数は自動で取り込まれます（直すときは ⌨ から入力）";
+
 function updateCards() {
     const cards = $("cards").children;
+    const locked = squareLocked();
     ui.state.items.forEach((it, i) => {
         const el = cards[i];
         if (!el) return;
@@ -310,6 +350,11 @@ function updateCards() {
         f("term").textContent = yen((it.term.cash + it.term.paypay) * it.price);
         f("total").textContent = yen((it.total.cash + it.total.paypay) * it.price);
         el.classList.toggle("has-draft", Boolean(d.cash || d.paypay));
+
+        const sqRow = el.querySelector(".pay-paypay");
+        sqRow.classList.toggle("locked", locked);
+        sqRow.title = locked ? SQUARE_LOCKED_MSG : "";
+        for (const b of sqRow.querySelectorAll('[data-act="add"], [data-act="sub"]')) b.disabled = locked;
     });
 }
 
@@ -569,7 +614,7 @@ function onKeyDown(e) {
     const handlers = {
         Enter: openPcSummary,
         F1: () => moveDrafts("cash"),
-        F2: () => moveDrafts("paypay"),
+        F2: () => (squareLocked() ? showToast(SQUARE_LOCKED_MSG) : moveDrafts("paypay")),
         Escape: confirmExit,
         Backspace: clearDrafts,
         Delete: clearDrafts,
@@ -586,6 +631,10 @@ function onKeyDown(e) {
         e.preventDefault();
         const ptype = idx < 3 ? "cash" : "paypay";
         const op = idx % 3;
+        if (ptype === "paypay" && op !== 1 && squareLocked()) {
+            showToast(SQUARE_LOCKED_MSG);
+            return;
+        }
         if (op === 0) addDraft(it.name, ptype, 1);
         else if (op === 1) openNumpad(it, ptype);
         else addDraft(it.name, ptype, -1);
@@ -595,9 +644,11 @@ function onKeyDown(e) {
 
 function bindEvents() {
     $("login-btn").addEventListener("click", doLogin);
-    $("login-name").addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) doLogin();
-    });
+    for (const id of ["login-name", "login-pass"]) {
+        $(id).addEventListener("keydown", (e) => {
+            if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) doLogin();
+        });
+    }
 
     document.querySelector(".nav").addEventListener("click", (e) => {
         const b = e.target.closest("[data-nav]");
@@ -622,6 +673,7 @@ function bindEvents() {
             "change-operator": changeOperator,
             commit: openPcSummary,
             "square-check": squareCheckClicked,
+            logout,
             "square-retry": squareRetryClicked,
             "square-unmatched": () => openUnmatched(),
         };

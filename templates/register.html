@@ -18,6 +18,11 @@
             <h1>レジシステム</h1>
             <label for="login-name">端末使用者の名前</label>
             <input id="login-name" class="input" autocomplete="off">
+            <!-- 子機（親機以外の PC・タブレット）のときだけ、親機で決めたパスワードを入れる -->
+            <div class="login-pass" id="login-pass-row" hidden>
+                <label for="login-pass">子機のパスワード</label>
+                <input id="login-pass" class="input" type="password" autocomplete="off">
+            </div>
             <button id="login-btn" class="btn btn-primary btn-block">システムを開始</button>
             <p class="error" id="login-error"></p>
         </div>
@@ -31,6 +36,7 @@
                 <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>
                 <span id="side-user"></span>
             </div>
+            <button class="side-logout" data-action="logout">ログアウト</button>
             <nav class="nav">
                 <button class="nav-item" data-nav="dashboard">
                     <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg>
