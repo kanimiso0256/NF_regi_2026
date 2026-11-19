@@ -582,7 +582,7 @@ class RegisterState:
     # ---------- 画面用スナップショット ----------
     def snapshot(self, t):
         with self._lock:
-            items, totals = self._items_for(t.mode) if t.active else ([], {"term": 0, "cumulative": 0, "total": 0})
+            items, totals = self._items_for(t.mode) if t.active else ([], {"qty": 0, "term": 0, "cumulative": 0, "total": 0})
             return {
                 "logged_in": True,
                 "terminal_user": t.name,
@@ -603,7 +603,7 @@ class RegisterState:
             }
 
     def _items_for(self, mode):
-        """期間 mode の商品カードの内容と、料金・累積・総合"""
+        """期間 mode の商品カードの内容と、合計個数・料金・累積・総合"""
         terms = self._conf["terms"]
         # 累積は「調整」とその期間までの合計、総合は全期間（テストは含めない）
         running = [ADJUST_TERM] + (terms[:terms.index(mode) + 1] if mode in terms else [])
@@ -641,7 +641,9 @@ class RegisterState:
         def amount_sum(term_list):
             return sum(yen(c) for x in term_list for c in self._term_amounts(x).values())
 
-        totals = {"term": amount_sum([mode]), "cumulative": amount_sum(running), "total": amount_sum(everything)}
+        # 合計個数は、この期間に売れた個数（全商品・全支払い方法）
+        qty = sum(sum(c.values()) for c in self._term_counts(mode).values())
+        totals = {"qty": qty, "term": amount_sum([mode]), "cumulative": amount_sum(running), "total": amount_sum(everything)}
         return items, totals
 
     # ---------- 内部処理 ----------
