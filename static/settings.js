@@ -1,5 +1,5 @@
-// settings.js — 設定画面（期間・目標金額・メニュー・Square 連携）
-// 管理者パスワードでログインすると、サーバーから合言葉（token）を受け取り、以降の読み書きに付ける。
+// settings.js — 設定画面（期間・目標金額・メニュー・子機の接続・Square 連携）
+// 管理者パスワードでログインすると、サーバーからトークン（token）を受け取り、以降の読み書きに付ける。
 "use strict";
 
 const settings = {
@@ -10,7 +10,11 @@ const settings = {
     // Square 連携 { environment, location_id, token_set, token_hint, token（入力中）, locations, msg }
     // 期間・メニューの「保存」とは別に、この欄の「保存」で保存する
     sq: null,
+    // 子機の接続 { lan, urls, passcode, terminals, input（入力中のパスワード）, msg }
+    lan: null,
 };
+
+const LAN_POLL_MS = 10000;   // 接続中の端末の一覧を更新する間隔
 
 async function adminApi(path, body) {
     const opts = {
@@ -24,11 +28,15 @@ async function adminApi(path, body) {
     } catch {
         throw new Error("サーバーに接続できません。web_main.py が起動しているか確認してください。");
     }
-    if (res.status === 401) {
-        lockSettings();
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401 && data.login) {
+        showLogin(data.need_passcode);   // 端末のログインが切れた
+        throw new Error(data.error);
+    }
+    if (res.status === 403) {
+        lockSettings();                  // 管理者ログインが切れた
         throw new Error("もう一度ログインしてください");
     }
-    const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || `エラーが発生しました (${res.status})`);
     return data;
 }
@@ -41,7 +49,7 @@ async function openSettings() {
     }
     try {
         loadSettingsModel(await adminApi("/pc/api/admin/settings"));
-        await loadSquareSettings();
+        await Promise.all([loadSquareSettings(), loadLanSettings()]);
     } catch (e) {
         $("admin-error").textContent = e.message;
     }
@@ -52,6 +60,7 @@ function lockSettings() {
     settings.model = null;
     settings.dirty = false;
     settings.sq = null;
+    settings.lan = null;
     $("settings-body").hidden = true;
     $("settings-body").innerHTML = "";
     $("settings-lock").hidden = false;
@@ -66,7 +75,7 @@ async function adminLogin() {
         settings.token = token;
         $("admin-pass").value = "";
         loadSettingsModel(await adminApi("/pc/api/admin/settings"));
-        await loadSquareSettings();
+        await Promise.all([loadSquareSettings(), loadLanSettings()]);
     } catch (e) {
         $("admin-error").textContent = e.message;
     }
@@ -149,11 +158,98 @@ function renderSettings(message = "") {
                 <button class="btn btn-ghost btn-small" data-set="add" data-list="menu">＋ 商品を追加</button>
             </article>
 
+            <article class="panel lan-settings" id="lan-panel">${lanPanelHtml()}</article>
+
             <article class="panel sq-settings" id="sq-panel">${squarePanelHtml()}</article>
         </div>`;
 }
 
 // ---------- Square 連携 ----------
+// ---------- 子機の接続 ----------
+async function loadLanSettings() {
+    const s = await adminApi("/pc/api/admin/lan");
+    const keep = settings.lan;
+    settings.lan = { ...s, input: keep ? keep.input : s.passcode, msg: keep?.msg || "" };
+    renderLanPanel();
+}
+
+function renderLanPanel() {
+    const el = $("lan-panel");
+    if (!el) return;
+    // パスワードを入力している最中に一覧の更新で書き換えると、カーソルが飛ぶので入力欄はそのまま残す
+    const focused = document.activeElement?.dataset?.lan === "input";
+    if (focused) {
+        el.querySelector(".lan-terminals").outerHTML = lanTerminalsHtml();
+        return;
+    }
+    el.innerHTML = lanPanelHtml();
+}
+
+function lanPanelHtml() {
+    const q = settings.lan;
+    const head = `
+        <p class="eyebrow">DEVICES</p>
+        <h3 class="panel-title">子機の接続</h3>`;
+    if (!q) return head + `<p class="muted">読み込み中…</p>`;
+    const where = q.lan
+        ? `<div class="lan-urls">
+               <span class="kpi-label">子機のブラウザで開くアドレス（同じ Wi-Fi につないでください）</span>
+               ${q.urls.length ? q.urls.map((u) => `<code>${esc(u)}</code>`).join("")
+                   : `<span class="sq-error">この PC がネットワークにつながっていません</span>`}
+           </div>`
+        : `<p class="notice lan-off">今は親機だけで使う起動になっています。子機からも使うときは、親機を
+               <code>python web_main.py --lan</code> で起動し直してください。</p>`;
+    return head + `
+        ${where}
+        <label class="sq-field">
+            <span class="kpi-label">子機のパスワード（子機でログインするときに入れます。4 文字以上）</span>
+            <input class="field" data-lan="input" autocomplete="off" spellcheck="false" value="${esc(q.input)}"
+                placeholder="未設定（子機からは使えません）">
+        </label>
+        <div class="sq-actions">
+            <button class="btn btn-primary" data-set="lan-save">パスワードを保存</button>
+            <span class="muted lan-help">変えると、ログイン中の子機はログインし直しになります</span>
+        </div>
+        <p class="settings-msg sq-msg">${esc(q.msg)}</p>
+        ${lanTerminalsHtml()}`;
+}
+
+function lanTerminalsHtml() {
+    const list = settings.lan?.terminals || [];
+    const rows = list.map((t) => `
+        <tr>
+            <td>${esc(t.name)}</td>
+            <td>${t.is_local ? "親機" : "子機"}</td>
+            <td>${t.mode ? esc(t.mode) : `<span class="muted">—</span>`}</td>
+            <td>${t.operator ? esc(t.operator) : `<span class="muted">—</span>`}</td>
+            <td class="muted">${esc(t.seen)}</td>
+        </tr>`).join("");
+    return `
+        <div class="lan-terminals">
+            <span class="kpi-label">ログイン中の端末</span>
+            <table class="edit-table">
+                <thead><tr><th>名前</th><th>種類</th><th>販売中の期間</th><th>担当</th><th>最終通信</th></tr></thead>
+                <tbody>${rows || `<tr><td colspan="5" class="muted">ありません</td></tr>`}</tbody>
+            </table>
+        </div>`;
+}
+
+async function saveLanSettings() {
+    const q = settings.lan;
+    try {
+        const s = await adminApi("/pc/api/admin/lan", { passcode: q.input });
+        settings.lan = { ...s, input: s.passcode, msg: s.passcode ? "保存しました" : "パスワードを消しました（子機からは使えません）" };
+    } catch (e) {
+        q.msg = e.message;
+    }
+    renderLanPanel();
+}
+
+// 設定画面を開いている間は、ログイン中の端末の一覧を更新する
+setInterval(() => {
+    if (ui.view === "settings" && settings.token && settings.lan) loadLanSettings().catch(() => {});
+}, LAN_POLL_MS);
+
 async function loadSquareSettings() {
     const s = await adminApi("/pc/api/admin/square");
     settings.sq = { ...s, token: "", locations: settings.sq?.locations || null, msg: "" };
@@ -272,6 +368,10 @@ function markDirty() {
 
 function onSettingsInput(e) {
     const el = e.target;
+    if (el.dataset.lan && settings.lan) {
+        settings.lan[el.dataset.lan] = el.value;
+        return;
+    }
     if (el.dataset.sq && settings.sq) {
         settings.sq[el.dataset.sq] = el.type === "checkbox" ? el.checked : el.value;
         return;
@@ -293,6 +393,7 @@ function onSettingsClick(e) {
     switch (b.dataset.set) {
         case "save": saveSettings(); return;
         case "sq-test": squareTest(); return;
+        case "lan-save": saveLanSettings(); return;
         case "sq-save": squareSave(); return;
         case "sq-clear": squareClearToken(); return;
         case "lock": confirmLeaveSettings().then((ok) => ok && lockSettings()); return;

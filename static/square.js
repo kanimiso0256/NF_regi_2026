@@ -184,7 +184,7 @@ function renderRegSquare() {
 function onRegisterSquareState() {
     const last = ui.state?.square?.last_import;
     const key = last ? JSON.stringify(last) : "";
-    if (sq.lastImportKey !== null && key && key !== sq.lastImportKey) {
+    if (sq.lastImportKey !== null && key && key !== sq.lastImportKey && last.term === ui.state.mode) {
         showToast(`Square から ${last.orders}件（${last.qty}点）取り込みました`);
         refreshRegSquare();
     }

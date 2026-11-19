@@ -121,10 +121,11 @@ class DataManager:
     def get_terminal_user(self):
         return self.load_settings().get("terminal_user", "")
 
-    def log_action(self, user, location, action, target, value):
+    def log_action(self, user, location, action, target, value, terminal=None):
+        """terminal: 操作した端末の名前（ブラウザ版で親機・子機を区別する）。省略すると settings.json の端末使用者"""
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
         if not user: user = "General User"
-        terminal_user = self.get_terminal_user()
+        terminal_user = terminal if terminal is not None else self.get_terminal_user()
         if not terminal_user: terminal_user = "Unassigned"
 
         try:
