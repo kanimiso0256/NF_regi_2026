@@ -681,6 +681,7 @@ kbd {
 .total { min-width: 130px; padding: 0 20px; border-left: 1px solid var(--line); }
 .total .kpi-label { margin-bottom: 0; font-size: 12px; }
 .total .kpi { font-size: clamp(20px, 3vh, 28px); }
+.total-qty { min-width: 100px; }
 /* レジ上部の Square 欄。取り込めなかった会計があるとき・エラーのときだけ押せる（一覧を開く・再試行） */
 .sq-check {
     margin: 0;
@@ -926,16 +927,19 @@ kbd {
     .tab { min-width: 64px; padding: 10px 10px 8px; font-size: 15px; }
     .tab-sep { margin: 0 4px; }
 
-    /* レジ：上の帯は「終了・期間・担当」の下に金額を 4 つ並べる */
+    /* レジ：上の帯は「終了・期間・担当」の下に個数と金額を 4 つ並べ、Square はその下に 1 行で出す */
     .reg-body { gap: 8px; padding: 8px; }
     .reg-head { gap: 8px 12px; padding: 10px 12px; }
     .reg-title { flex: 1; min-width: 0; }
     .operator { order: 2; font-size: 12px; }
-    .totals { order: 3; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); width: 100%; margin-left: 0; }
+    .totals { order: 3; display: grid; grid-template-columns: auto repeat(3, minmax(0, 1fr)); width: 100%; margin-left: 0; }
     .total { min-width: 0; padding: 0 6px; }
     .total:first-child { padding-left: 0; border-left: none; }
     .total .kpi { font-size: 16px; }
     .total .kpi-label { font-size: 10px; white-space: nowrap; }
+    /* Square 欄は幅が足りないので、下に 1 行で出す（Square 自動取込 ¥0 レジ ¥0・一致） */
+    .totals .sq-check { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 8px; margin-top: 6px; padding: 6px 0 0; border-left: none; border-top: 1px solid var(--line); }
+    .totals .sq-check .sq-diff { margin-left: auto; }
 
     .products { padding: 6px 12px; }
     .products > .eyebrow { display: none; }
