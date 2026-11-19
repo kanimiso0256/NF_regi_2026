@@ -1,19 +1,19 @@
 # analytics.py
 """ダッシュボード用の集計。
 
-売上金額は期間ごとの CSV（<期間>.csv）の個数 × 現在の単価で出す（レジ画面の「Term」と同じ）。
-時間別売上・売上の推移・会計件数は current_log.csv の記録から計算する。
+売上金額は current_log.csv に記録した金額（売れたときの値段）で出す（レジ画面の「Term」と同じ）。
+金額の書かれていない古い記録だけは今の値段で計算する（sales_log.py）。
+個数は期間ごとの CSV（<期間>.csv）、時間別売上・売上の推移・会計件数はログから計算する。
 
 ログでは 1 回の会計が
     CommitOrder（PC での確定）または SquareImport（Square の会計の取り込み）
     Add / Sub（商品ごとの増減。Location が期間名）
 の順に書かれるので、その直後に続く Add/Sub をまとめて 1 件として数える。
 """
-import csv
 from collections import defaultdict
-from datetime import datetime
 
-COUNT_ACTIONS = ("Add", "Sub", "加算", "減算")
+import sales_log
+
 COMMIT_ACTIONS = ("CommitOrder", "SquareImport")
 DEFAULT_HOURS = (9, 17)   # データが少なくてもこの時間帯は表示する
 MAX_TREND_POINTS = 80
@@ -24,14 +24,15 @@ def build(dm, term=None, current_mode=None):
     settings = dm.load_settings()
     terms = settings.get("terms", [])
     prices = {m["name"]: int(m.get("price", 0)) for m in settings.get("menu", [])}
+    amounts = sales_log.term_amounts(dm.log_path, prices)
 
-    sales_by_term = {t: _term_sales(dm, t, prices)[0] for t in terms}
+    sales_by_term = {t: _term_sales(dm, t, amounts)[0] for t in terms}
     term = _pick_term(term, terms, current_mode, sales_by_term)
     if term is None:
         return {"terms": [], "term": None}
 
-    sales, mix = _term_sales(dm, term, prices)
-    pay = _pay_split(dm, term, prices)
+    sales, mix = _term_sales(dm, term, amounts)
+    pay = _pay_split(amounts, term)
     hourly, trend, transactions = _scan_log(dm.log_path, term, prices)
 
     idx = terms.index(term)
@@ -71,12 +72,15 @@ def _pick_term(term, terms, current_mode, sales_by_term):
     return terms[0] if terms else None
 
 
-def _term_sales(dm, term, prices):
+def _term_sales(dm, term, amounts):
     counts = dm.load_csv_data(f"{term}.csv")
+    term_amounts = amounts.get(term, {})
     rows = []
-    for name, c in counts.items():
+    for name in set(counts) | set(term_amounts):
+        c = counts.get(name, {"cash": 0, "paypay": 0})
+        a = term_amounts.get(name, {"cash": 0, "paypay": 0})
         qty = c["cash"] + c["paypay"]
-        amount = qty * prices.get(name, 0)
+        amount = a["cash"] + a["paypay"]
         if amount > 0:
             rows.append({"name": name, "qty": qty, "amount": amount})
     rows.sort(key=lambda r: r["amount"], reverse=True)
@@ -95,12 +99,12 @@ def _term_sales(dm, term, prices):
     return total, rows
 
 
-def _pay_split(dm, term, prices):
+def _pay_split(amounts, term):
     """レジに記録した売上を、現金と Square の枠に分けた金額"""
-    counts = dm.load_csv_data(f"{term}.csv")
+    term_amounts = amounts.get(term, {})
     return {
-        "cash": sum(c["cash"] * prices.get(name, 0) for name, c in counts.items()),
-        "square": sum(c["paypay"] * prices.get(name, 0) for name, c in counts.items()),
+        "cash": sum(a["cash"] for a in term_amounts.values()),
+        "square": sum(a["paypay"] for a in term_amounts.values()),
     }
 
 
@@ -118,42 +122,37 @@ def _scan_log(log_path, term, prices):
             transactions += 1
         commit = None
 
-    try:
-        with open(log_path, "r", encoding="utf-8") as f:
-            reader = csv.reader(f)
-            next(reader, None)
-            for row in reader:
-                if len(row) < 7:
-                    continue
-                ts, _user, _terminal, loc, action, target, value = row[:7]
-
-                if action not in COUNT_ACTIONS:
-                    close_commit()
-                    if action in COMMIT_ACTIONS:
-                        commit = {"loc": None, "qty": 0}
-                    continue
-
-                try:
-                    delta = int(value.split()[0])
-                    dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S.%f")
-                except (ValueError, IndexError):
-                    continue
-
-                if commit is not None:
-                    if commit["loc"] is None:
-                        commit["loc"] = loc
-                    if commit["loc"] == loc:
-                        commit["qty"] += delta
-
-                if loc != term or " [" not in target:
-                    continue
-                amount = delta * prices.get(target.rsplit(" [", 1)[0], 0)
-                hourly[dt.hour] += amount
-                running += amount
-                points.append((dt, running))
+    for row in sales_log.read_rows(log_path):
+        if len(row) < 7:
+            continue
+        action = row[4]
+        if action not in sales_log.COUNT_ACTIONS:
             close_commit()
-    except OSError:
-        pass
+            if action in COMMIT_ACTIONS:
+                commit = {"loc": None, "qty": 0}
+            continue
+
+        e = sales_log.parse_count_row(row)
+        if e is None:
+            continue
+        try:
+            dt = sales_log.row_time(e)
+        except ValueError:
+            continue
+
+        if commit is not None:
+            if commit["loc"] is None:
+                commit["loc"] = e["term"]
+            if commit["loc"] == e["term"]:
+                commit["qty"] += e["qty"]
+
+        if e["term"] != term:
+            continue
+        amount = sales_log.amount_of(e, prices)
+        hourly[dt.hour] += amount
+        running += amount
+        points.append((dt, running))
+    close_commit()
 
     hours = list(hourly) + list(DEFAULT_HOURS)
     hourly_list = [{"hour": h, "amount": hourly.get(h, 0)} for h in range(min(hours), max(hours) + 1)]

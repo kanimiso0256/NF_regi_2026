@@ -347,8 +347,9 @@ function updateCards() {
             badge.textContent = d[p] > 0 ? `+${d[p]}` : d[p] < 0 ? String(d[p]) : "";
             badge.className = "pay-draft" + (d[p] > 0 ? " pos" : d[p] < 0 ? " neg" : "");
         }
-        f("term").textContent = yen((it.term.cash + it.term.paypay) * it.price);
-        f("total").textContent = yen((it.total.cash + it.total.paypay) * it.price);
+        // 売上の金額はサーバーが記録した金額（売れたときの値段）。今の値段 × 個数ではない
+        f("term").textContent = yen(it.amount.term);
+        f("total").textContent = yen(it.amount.total);
         el.classList.toggle("has-draft", Boolean(d.cash || d.paypay));
 
         const sqRow = el.querySelector(".pay-paypay");

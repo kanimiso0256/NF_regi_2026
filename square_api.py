@@ -21,12 +21,13 @@ Square 側はその日の全決済を数えるので、同じ日に複数の期�
     auto_import  : 会計を自動で取り込むか
     import_since : 自動取り込みをオンにした時刻。これより前の会計は取り込まない（手で入力済みの分を二重に数えないため）
 """
-import csv
 import threading
 import time
 from datetime import date, datetime, timedelta
 
 import requests
+
+import sales_log
 
 API_BASE = {
     "production": "https://connect.squareup.com",
@@ -39,7 +40,6 @@ CACHE_SEC_PAST = 600      # 過去の日はほぼ変わらないので 10 分
 MIN_REFRESH_SEC = 5       # 「取得」ボタンの連打で API を叩きすぎないように
 ERROR_RETRY_SEC = 20      # つながらなかったときは、しばらく問い合わせを控える（オフラインの会場で画面が重くならないように）
 
-COUNT_ACTIONS = ("Add", "Sub", "加算", "減算")
 SQUARE_PTYPE = "paypay"   # レジの「Square」枠（過去の CSV と合わせてキーは paypay のまま）
 
 DEFAULT_SETTINGS = {
@@ -342,26 +342,19 @@ class SquareReconciler:
 
 
 def register_by_day(log_path, term, prices):
-    """レジに記録した Square 枠の売上を日ごとに合計する（{date: 金額}）"""
+    """レジに記録した Square 枠の売上を日ごとに合計する（{date: 金額}）。
+
+    金額は記録した時点の金額（Square から取り込んだ会計は Square で払われた金額）。
+    金額の書かれていない古い記録だけ、今の値段 prices で計算する
+    """
     by_day = {}
-    suffix = f" [{SQUARE_PTYPE}]"
-    try:
-        with open(log_path, "r", encoding="utf-8") as f:
-            reader = csv.reader(f)
-            next(reader, None)
-            for row in reader:
-                if len(row) < 7:
-                    continue
-                ts, _user, _terminal, loc, action, target, value = row[:7]
-                if loc != term or action not in COUNT_ACTIONS or not target.endswith(suffix):
-                    continue
-                try:
-                    delta = int(value.split()[0])
-                    day = datetime.fromisoformat(ts).date()
-                except (ValueError, IndexError):
-                    continue
-                name = target[:-len(suffix)]
-                by_day[day] = by_day.get(day, 0) + delta * prices.get(name, 0)
-    except OSError:
-        pass
+    for row in sales_log.read_rows(log_path):
+        e = sales_log.parse_count_row(row)
+        if e is None or e["term"] != term or e["ptype"] != SQUARE_PTYPE:
+            continue
+        try:
+            day = datetime.fromisoformat(e["ts"]).date()
+        except ValueError:
+            continue
+        by_day[day] = by_day.get(day, 0) + sales_log.amount_of(e, prices)
     return by_day

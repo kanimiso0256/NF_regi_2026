@@ -19,6 +19,7 @@ import time
 from datetime import date, datetime
 from types import SimpleNamespace
 
+import sales_log
 from square_api import API_BASE, SquareClient, SquareError, SquareReconciler, load_config, order_lines
 
 PTYPES = ("cash", "paypay")
@@ -72,6 +73,8 @@ class RegisterState:
 
         self.terminals = {}           # 端末 ID → Terminal
         self._counts = {}             # 期間 → {商品名: {"cash": 個数, "paypay": 個数}}（CSV を読んだもの）
+        self._amounts = None          # 期間 → {商品名: {"cash": 円, "paypay": 円}}（ログから集計。初めて使うときに読む）
+        self._test_amounts = {}       # テストの金額（テストの個数と同じく保存しない）
         self._admin_tokens = set()
 
         # 毎秒の状態取得で settings.json を読み書きしないよう、メニューなどは読んでおく
@@ -96,6 +99,8 @@ class RegisterState:
                 "terms": list(settings.get("terms", [])),
                 "card_width": int(settings.get("card_settings", {}).get("width", 150)),
             }
+            # 金額の書かれていない古い記録は今の値段で計算するので、値段が変わったら集計し直す
+            self._amounts = None
 
     def _log(self, user, location, action, target, value, terminal):
         self.dm.log_action(user, location, action, target, value, terminal=terminal)
@@ -396,7 +401,8 @@ class RegisterState:
         unmatched = []
         for name, qty, amount in lines:
             if name in names:
-                self._apply_count(term, name, ptype, qty, by="Square", user="Square", terminal="Square")
+                # 金額は Square で実際に払われた金額（レジのメニューの値段ではなく）
+                self._apply_count(term, name, ptype, qty, amount, by="Square", user="Square", terminal="Square")
                 added += qty
             else:
                 unmatched.append((name, qty, amount))
@@ -497,6 +503,7 @@ class RegisterState:
             # テストの個数は、誰もテストを使っていないところから始めるときに 0 に戻す
             if mode == TEST_TERM and not any(x.active and x.is_test for x in self.terminals.values() if x is not t):
                 self._counts[TEST_TERM] = {}
+                self._test_amounts = {}
             t.operator = operator
             t.mode = mode
             t.active = True
@@ -522,7 +529,9 @@ class RegisterState:
     def commit_pc_order(self, t, drafts):
         with self._lock:
             self._require_active(t)
-            names = {m["name"] for m in self._visible_menu()}
+            # 売上の金額は、確定したときの値段で記録する（あとで値段を変えても過去の記録は変わらない）
+            prices = {m["name"]: int(m.get("price", 0)) for m in self._visible_menu()}
+            names = set(prices)
             counts = self._term_counts(t.mode)
             changes = []
             for d in drafts or []:
@@ -546,7 +555,8 @@ class RegisterState:
             lines = [f"・{n} ({PTYPE_JP[p]}) x{q:+d}" for n, p, q in changes]
             self._log(t.operator, t.mode, "CommitOrder", "PC", f"合計 {len(changes)}種\n" + "\n".join(lines), t.name)
             for name, ptype, qty in changes:
-                self._apply_count(t.mode, name, ptype, qty, by=t.operator, user=t.operator, terminal=t.name)
+                self._apply_count(t.mode, name, ptype, qty, qty * prices[name],
+                                  by=t.operator, user=t.operator, terminal=t.name)
             self._save_term(t.mode)
 
     # ---------- 画面用スナップショット ----------
@@ -580,30 +590,38 @@ class RegisterState:
         everything = terms + [ADJUST_TERM]
         zero = {"cash": 0, "paypay": 0}
 
-        def sum_of(name, term_list):
+        def sum_of(source, name, term_list):
             out = dict(zero)
             for x in term_list:
-                c = self._term_counts(x).get(name, zero)
+                c = source(x).get(name, zero)
                 out["cash"] += c["cash"]
                 out["paypay"] += c["paypay"]
             return out
 
+        def yen(c):
+            return c["cash"] + c["paypay"]
+
+        # 金額は記録した時点の値段で数える（個数 × 今の値段ではない）。
+        # 料金・累積・総合は、レジに出していない商品や、もうメニューにない商品の売上も含める
         items = []
-        totals = {"term": 0, "cumulative": 0, "total": 0}
         for i, m in enumerate(self._visible_menu()):
-            name, price = m["name"], int(m.get("price", 0))
-            term = dict(self._term_counts(mode).get(name, zero))
-            cumulative = sum_of(name, running)
-            total = sum_of(name, everything)
+            name = m["name"]
             items.append({
                 "name": name,
-                "price": price,
+                "price": int(m.get("price", 0)),
                 "keys": SHORTCUT_KEYS[i] if i < len(SHORTCUT_KEYS) else None,
-                "term": term,
-                "total": total,
+                "term": dict(self._term_counts(mode).get(name, zero)),
+                "total": sum_of(self._term_counts, name, everything),
+                "amount": {
+                    "term": yen(self._term_amounts(mode).get(name, zero)),
+                    "total": yen(sum_of(self._term_amounts, name, everything)),
+                },
             })
-            for key, c in (("term", term), ("cumulative", cumulative), ("total", total)):
-                totals[key] += (c["cash"] + c["paypay"]) * price
+
+        def amount_sum(term_list):
+            return sum(yen(c) for x in term_list for c in self._term_amounts(x).values())
+
+        totals = {"term": amount_sum([mode]), "cumulative": amount_sum(running), "total": amount_sum(everything)}
         return items, totals
 
     # ---------- 内部処理 ----------
@@ -622,12 +640,25 @@ class RegisterState:
         if not t.active:
             raise RegisterError("販売モードではありません")
 
-    def _apply_count(self, term, name, ptype, qty, by, user, terminal):
+    def _apply_count(self, term, name, ptype, qty, amount, by, user, terminal):
+        """個数を qty 増やし、売上の金額を amount 円足す（どちらもマイナスなら減らす）"""
         c = self._term_counts(term).setdefault(name, {"cash": 0, "paypay": 0})
+        a = self._term_amounts(term).setdefault(name, {"cash": 0, "paypay": 0})
         new_val = c[ptype] + qty
         action = "Add" if qty > 0 else "Sub"
-        self._log(user, term, action, f"{name} [{ptype}]", f"{qty:+d} (Term: {new_val}) by {by}", terminal)
+        self._log(user, term, action, f"{name} [{ptype}]", sales_log.format_value(qty, amount, new_val, by), terminal)
         c[ptype] = new_val
+        a[ptype] += amount
+
+    def _term_amounts(self, term):
+        """期間の売上金額（商品・支払い方法ごと）。初めて使うときにログから全期間分を集計する"""
+        # テストの個数は親機を起動するたびに 0 から始まる（_term_counts と同じ）ので、金額も過去の記録は使わない
+        if term == TEST_TERM:
+            return self._test_amounts
+        if self._amounts is None:
+            prices = {m["name"]: int(m.get("price", 0)) for m in self._conf["menu"]}
+            self._amounts = sales_log.term_amounts(self.dm.log_path, prices)
+        return self._amounts.setdefault(term, {})
 
     def _save_term(self, term):
         if term == TEST_TERM:
