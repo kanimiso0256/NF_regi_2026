@@ -283,7 +283,9 @@ function renderRegister() {
     $("mode-note").textContent = s.is_test ? "保存されません" : s.allow_negative ? "マイナス入力可" : "";
     $("mode-note").dataset.kind = s.is_test ? "test" : s.allow_negative ? "adjust" : "";
     $("operator-name").textContent = s.operator;
-    $("total-qty").textContent = `${(s.totals.qty || 0).toLocaleString("ja-JP")}個`;
+    // 親機を再起動する前の古い画面（合計個数の欄がない）でも止まらないようにする
+    const qtyEl = $("total-qty");
+    if (qtyEl) qtyEl.textContent = `${(s.totals.qty || 0).toLocaleString("ja-JP")}個`;
     $("total-term").textContent = yen(s.totals.term);
     $("total-cumulative").textContent = yen(s.totals.cumulative);
     $("total-total").textContent = yen(s.totals.total);
