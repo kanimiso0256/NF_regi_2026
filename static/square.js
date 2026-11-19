@@ -98,17 +98,17 @@ function renderDashSquare(r) {
                 </tr>`).join("")}</tbody>
         </table>` : "";
 
-    const env = r.environment === "sandbox" ? "（サンドボックス）" : "";
     const lines = [];
     const failed = Boolean(r.error) || r.sync?.state === "error";
     if (r.error) lines.push(`<span class="sq-error">${esc(r.error)}</span>`);
     else if (r.days.length) {
-        lines.push(`${esc(r.checked_at)} 時点${env}`);
+        lines.push(`${esc(r.checked_at)} 時点`);
         // 自動取り込みがオフだと会計がどの期間のものか分からないので、その日の決済をすべて数えている
         if (r.scope === "day") lines.push("Square 実績はその日の全決済");
     }
-    else lines.push(`この期間の記録はまだありません${env}`);
-    const sync = syncLabel(r.sync);
+    else lines.push("この期間の記録はまだありません");
+    // 取り込みが止まっているだけ（販売していない・テスト中など）のときは、ダッシュボードには出さない
+    const sync = r.sync?.state === "paused" ? "" : syncLabel(r.sync);
     if (sync) lines.push(`<span class="${r.sync.state === "error" ? "sq-error" : ""}">${esc(sync)}</span>`);
     const unmatched = r.unmatched?.length ? `
         <button class="btn btn-small sq-unmatched-btn" data-action="square-unmatched">
