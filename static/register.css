@@ -69,7 +69,7 @@ body {
     overflow: hidden;
 }
 
-button { font: inherit; cursor: pointer; }
+button { font: inherit; cursor: pointer; touch-action: manipulation; }   /* スマホで連打しても画面が拡大されないように */
 button:disabled { cursor: not-allowed; opacity: .45; }
 
 kbd {
@@ -787,7 +787,7 @@ kbd {
 .pay-pad { color: #999; font-size: 13px; }
 .pay-btn kbd { margin-left: 3px; padding: 0; background: none; color: #555; }
 /* Square の自動取り込み中は、Square の段の ＋・－ を薄くして押せなくする（テンキーだけ使える） */
-.pay-row.locked .pay-btn:disabled { opacity: .3; cursor: not-allowed; background: #fff; }
+.pay-row.locked .pay-btn[aria-disabled="true"] { opacity: .3; cursor: not-allowed; background: #fff; }
 .pay-row.locked .pay-title::after { content: "自動"; padding: 0 5px; border: 1px solid var(--line); border-radius: 3px; font-size: 10px; line-height: 14px; }
 .pay-pad kbd { display: none; }   /* 幅が狭いのでテンキーのキー表示は隠す（title で確認できる） */
 
@@ -883,3 +883,97 @@ kbd {
 }
 .numpad-key:hover { background: #dfe4e7; }
 
+
+/* ---------- タッチ操作の端末（スマホ・タブレット） ---------- */
+@media (hover: none) {
+    .pay-btn kbd { display: none; }      /* キーボードがないので、キーの表示は出さない */
+    .nav-item::after { display: none; }  /* タップの後に背景が残らないように */
+}
+
+/* ---------- スマホ（子機） ----------
+   サイドバーは画面の下のタブに、商品のカードは縦に並べて 1 行ずつ（現金・PayPay・Square）押せるようにする */
+@media (max-width: 700px) {
+    html, body { height: 100dvh; }   /* アドレスバーの分を除いた高さ（対応していないブラウザは 100%） */
+
+    .app { flex-direction: column; }
+    .main { min-height: 0; }   /* 縦に並べたときに、下のタブが画面の外へ押し出されないように */
+    .sidebar {
+        order: 2;
+        flex: 0 0 auto;
+        flex-direction: row;
+        align-items: stretch;
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+    .brand, .side-user { display: none; }
+    .nav { flex: 1; flex-direction: row; margin: 0; }
+    .nav-item {
+        flex: 1;
+        flex-direction: column;
+        justify-content: center;
+        gap: 2px;
+        height: 56px;
+        padding: 0;
+        border: none;
+        font-size: 11px;
+        text-align: center;
+    }
+    .nav-item:first-child { border-top: none; }
+    .nav-item.active::before { right: 0; bottom: auto; width: auto; height: 3px; }
+    .icon { width: 22px; height: 22px; }
+    .side-logout { order: 2; align-self: center; margin: 0 10px 0 4px; font-size: 11px; }
+
+    .tabs { gap: 0; padding: 0 6px; }
+    .tab { min-width: 64px; padding: 10px 10px 8px; font-size: 15px; }
+    .tab-sep { margin: 0 4px; }
+
+    /* レジ：上の帯は「終了・期間・担当」の下に金額を 4 つ並べる */
+    .reg-body { gap: 8px; padding: 8px; }
+    .reg-head { gap: 8px 12px; padding: 10px 12px; }
+    .reg-title { flex: 1; min-width: 0; }
+    .operator { order: 2; font-size: 12px; }
+    .totals { order: 3; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); width: 100%; margin-left: 0; }
+    .total { min-width: 0; padding: 0 6px; }
+    .total:first-child { padding-left: 0; border-left: none; }
+    .total .kpi { font-size: 16px; }
+    .total .kpi-label { font-size: 10px; white-space: nowrap; }
+
+    .products { padding: 6px 12px; }
+    .products > .eyebrow { display: none; }
+    .cards { flex-direction: column; overflow-x: hidden; overflow-y: auto; border-top: none; }
+    .card { flex: none; padding: 10px 0; border-right: none; border-bottom: 1px solid var(--line); }
+    .card.has-draft { box-shadow: inset 3px 0 0 var(--accent); padding-left: 8px; }
+    .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
+    .item-price { font-size: 18px; }
+    .card-stats { display: none; }   /* 商品ごとの売上は、上の帯とダッシュボードで見る */
+    .pay-rows { flex: none; }
+    .pay-title { white-space: nowrap; }
+    .pay-row { flex: none; grid-template-columns: 92px minmax(0, 1fr) auto; grid-template-rows: auto; align-items: center; padding: 5px 0; }
+    .pay-btns { grid-column: auto; grid-template-columns: 52px 40px 52px; }
+    .pay-btn { min-height: 44px; }
+    .pay-count { font-size: 22px; }
+
+    .draft-bar { gap: 8px; padding: 8px 12px; }
+    #draft-summary { font-size: 13px; }
+    .draft-bar .btn-primary { padding: 12px 24px; }
+
+    /* ダッシュボード：1 列で縦にスクロール */
+    .dash-grid { min-height: 0; grid-auto-rows: minmax(340px, auto); gap: 8px; padding: 8px; }
+    .panel { padding: 16px; }
+
+    /* 設定 */
+    .settings-body { padding: 12px 8px 24px; }
+    .settings-head { flex-wrap: wrap; margin: 0 4px 12px; }
+    .settings-grid { gap: 12px; }
+    .settings-grid .panel { padding: 18px 14px; overflow-x: auto; }
+    .field, .input { font-size: 16px; }   /* iPhone で入力欄を押したときに画面が拡大されないように */
+    .lock-card, .login-card { padding: 28px 20px; }
+
+    /* 確認画面・テンキー */
+    .modal { padding: 18px; }
+    .numpad-head { margin: -18px -18px 0; padding: 14px 18px; }
+    .numpad-key { height: 52px; }
+    .modal-actions .btn { flex: 1; padding: 12px; }
+
+    .toast { bottom: 150px; max-width: calc(100% - 32px); text-align: center; }
+    .offline-banner { padding: 10px 12px; font-size: 13px; }
+}
