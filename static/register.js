@@ -389,7 +389,10 @@ function updateCards() {
         const sqRow = el.querySelector(".pay-paypay");
         sqRow.classList.toggle("locked", locked);
         sqRow.title = locked ? SQUARE_LOCKED_MSG : "";
-        for (const b of sqRow.querySelectorAll('[data-act="add"], [data-act="sub"]')) b.disabled = locked;
+        // disabled にするとタップしても何も起きず理由が分からないので、押せない見た目にして押したら理由を出す
+        for (const b of sqRow.querySelectorAll('[data-act="add"], [data-act="sub"]')) {
+            b.setAttribute("aria-disabled", String(locked));
+        }
     });
 }
 
@@ -722,6 +725,10 @@ function bindEvents() {
         const it = ui.state.items[idx];
         if (!it) return;
         const p = b.dataset.ptype;
+        if (b.getAttribute("aria-disabled") === "true") {
+            showToast(SQUARE_LOCKED_MSG);
+            return;
+        }
         if (b.dataset.act === "add") addDraft(it.name, p, 1);
         else if (b.dataset.act === "sub") addDraft(it.name, p, -1);
         else if (b.dataset.act === "pad") openNumpad(it, p);
