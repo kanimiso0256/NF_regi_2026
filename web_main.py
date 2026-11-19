@@ -33,6 +33,7 @@ from datetime import timedelta
 from flask import Flask, abort, jsonify, render_template, request, session
 
 import analytics
+import share_sheet
 from data_manager import DataManager
 from register_state import RegisterError, RegisterState
 
@@ -41,7 +42,8 @@ SQUARE_SYNC_SEC = 15   # Square の会計を取り込む間隔
 LOCAL_ADDRS = ("127.0.0.1", "::1")
 
 
-def create_app(state, dev=False, lan=False, secret_key=None):
+def create_app(state, dev=False, lan=False, secret_key=None, sharer=None):
+    sharer = sharer or share_sheet.SheetSharer(state.dm)
     app = Flask(__name__)
     app.config.update(
         # 開発モードでは register.html の変更を再起動なしで反映する（F5 で読み直す）
@@ -188,6 +190,33 @@ def create_app(state, dev=False, lan=False, secret_key=None):
         require_admin()
         return jsonify({"locations": state.square_locations(body())})
 
+    # ---------- ダッシュボードの共有（Google スプレッドシート） ----------
+    @app.get("/pc/api/admin/share")
+    def get_admin_share():
+        require_admin()
+        return jsonify(sharer.settings_view())
+
+    @app.post("/pc/api/admin/share")
+    def post_admin_share():
+        require_admin()
+        t = me()
+        try:
+            sharer.save(body())
+        except ValueError as e:
+            raise RegisterError(str(e))
+        conf = share_sheet.load_config(state.dm.load_settings())
+        state.dm.log_action(t.name, "Settings", "UpdateShare", "Web", "On" if conf["enabled"] else "Off", terminal=t.name)
+        return jsonify(sharer.settings_view())
+
+    @app.post("/pc/api/admin/share/send")
+    def post_admin_share_send():
+        require_admin()
+        try:
+            sharer.push(force=True)
+        except ValueError as e:
+            raise RegisterError(str(e))
+        return jsonify(sharer.settings_view())
+
     # ---------- Square ----------
     @app.post("/pc/api/square/sync")
     def post_square_sync():
@@ -266,8 +295,10 @@ def main():
     dev = "--dev" in sys.argv
     lan = "--lan" in sys.argv
     state = RegisterState(dm)
-    app = create_app(state, dev=dev, lan=lan, secret_key=secret_key(dm))
+    sharer = share_sheet.SheetSharer(dm)
+    app = create_app(state, dev=dev, lan=lan, secret_key=secret_key(dm), sharer=sharer)
     threading.Thread(target=square_sync_loop, args=(state,), daemon=True).start()
+    threading.Thread(target=share_sheet.share_loop, args=(sharer,), daemon=True).start()
 
     url = f"http://127.0.0.1:{PORT}/"
     print(f"レジ画面: {url}  （終了するにはこのウィンドウで Ctrl+C）")

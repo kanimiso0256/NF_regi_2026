@@ -22,8 +22,9 @@ from types import SimpleNamespace
 import sales_log
 from square_api import API_BASE, SquareClient, SquareError, SquareReconciler, load_config, order_lines
 
-PTYPES = ("cash", "paypay")
-PTYPE_JP = {"cash": "現金", "paypay": "Square"}  # キーは過去の CSV と合わせて "paypay" のまま
+PTYPES = sales_log.PTYPES
+# "paypay" は Square の枠（過去の CSV と合わせた名前）。"pp" は Square を通さずに受けて手で入力する PayPay
+PTYPE_JP = {"cash": "現金", "pp": "PayPay", "paypay": "Square"}
 SPECIAL_TERMS = ("調整", "テスト")
 TEST_TERM = "テスト"        # 個数は保存せず、親機を再起動すると消える
 ADJUST_TERM = "調整"        # マイナスの入力ができる
@@ -72,8 +73,8 @@ class RegisterState:
         self._lock = threading.RLock()
 
         self.terminals = {}           # 端末 ID → Terminal
-        self._counts = {}             # 期間 → {商品名: {"cash": 個数, "paypay": 個数}}（CSV を読んだもの）
-        self._amounts = None          # 期間 → {商品名: {"cash": 円, "paypay": 円}}（ログから集計。初めて使うときに読む）
+        self._counts = {}             # 期間 → {商品名: {"cash": 個数, "pp": 個数, "paypay": 個数}}（CSV を読んだもの）
+        self._amounts = None          # 期間 → {商品名: {支払い方法: 円}}（ログから集計。初めて使うときに読む）
         self._test_amounts = {}       # テストの金額（テストの個数と同じく保存しない）
         self._admin_tokens = set()
 
@@ -588,18 +589,18 @@ class RegisterState:
         # 累積は「調整」とその期間までの合計、総合は全期間（テストは含めない）
         running = [ADJUST_TERM] + (terms[:terms.index(mode) + 1] if mode in terms else [])
         everything = terms + [ADJUST_TERM]
-        zero = {"cash": 0, "paypay": 0}
+        zero = sales_log.zero()
 
         def sum_of(source, name, term_list):
             out = dict(zero)
             for x in term_list:
                 c = source(x).get(name, zero)
-                out["cash"] += c["cash"]
-                out["paypay"] += c["paypay"]
+                for p in PTYPES:
+                    out[p] += c.get(p, 0)
             return out
 
         def yen(c):
-            return c["cash"] + c["paypay"]
+            return sum(c.values())
 
         # 金額は記録した時点の値段で数える（個数 × 今の値段ではない）。
         # 料金・累積・総合は、レジに出していない商品や、もうメニューにない商品の売上も含める
@@ -610,7 +611,7 @@ class RegisterState:
                 "name": name,
                 "price": int(m.get("price", 0)),
                 "keys": SHORTCUT_KEYS[i] if i < len(SHORTCUT_KEYS) else None,
-                "term": dict(self._term_counts(mode).get(name, zero)),
+                "term": {**zero, **self._term_counts(mode).get(name, {})},
                 "total": sum_of(self._term_counts, name, everything),
                 "amount": {
                     "term": yen(self._term_amounts(mode).get(name, zero)),
@@ -632,7 +633,7 @@ class RegisterState:
         """期間の個数（初めて使うときに CSV から読む）。全端末で共有する"""
         if term not in self._counts:
             data = {} if term == TEST_TERM else self.dm.load_csv_data(f"{term}.csv")
-            self._counts[term] = {name: dict(c) for name, c in data.items()}
+            self._counts[term] = {name: {**sales_log.zero(), **c} for name, c in data.items()}
         return self._counts[term]
 
     @staticmethod
@@ -642,8 +643,10 @@ class RegisterState:
 
     def _apply_count(self, term, name, ptype, qty, amount, by, user, terminal):
         """個数を qty 増やし、売上の金額を amount 円足す（どちらもマイナスなら減らす）"""
-        c = self._term_counts(term).setdefault(name, {"cash": 0, "paypay": 0})
-        a = self._term_amounts(term).setdefault(name, {"cash": 0, "paypay": 0})
+        c = self._term_counts(term).setdefault(name, sales_log.zero())
+        a = self._term_amounts(term).setdefault(name, sales_log.zero())
+        c.setdefault(ptype, 0)
+        a.setdefault(ptype, 0)
         new_val = c[ptype] + qty
         action = "Add" if qty > 0 else "Sub"
         self._log(user, term, action, f"{name} [{ptype}]", sales_log.format_value(qty, amount, new_val, by), terminal)

@@ -77,10 +77,8 @@ def _term_sales(dm, term, amounts):
     term_amounts = amounts.get(term, {})
     rows = []
     for name in set(counts) | set(term_amounts):
-        c = counts.get(name, {"cash": 0, "paypay": 0})
-        a = term_amounts.get(name, {"cash": 0, "paypay": 0})
-        qty = c["cash"] + c["paypay"]
-        amount = a["cash"] + a["paypay"]
+        qty = sum(counts.get(name, {}).values())
+        amount = sum(term_amounts.get(name, {}).values())
         if amount > 0:
             rows.append({"name": name, "qty": qty, "amount": amount})
     rows.sort(key=lambda r: r["amount"], reverse=True)
@@ -100,11 +98,12 @@ def _term_sales(dm, term, amounts):
 
 
 def _pay_split(amounts, term):
-    """レジに記録した売上を、現金と Square の枠に分けた金額"""
+    """レジに記録した売上を、現金・PayPay（手入力）・Square の枠に分けた金額"""
     term_amounts = amounts.get(term, {})
     return {
-        "cash": sum(a["cash"] for a in term_amounts.values()),
-        "square": sum(a["paypay"] for a in term_amounts.values()),
+        "cash": sum(a.get("cash", 0) for a in term_amounts.values()),
+        "paypay": sum(a.get("pp", 0) for a in term_amounts.values()),
+        "square": sum(a.get("paypay", 0) for a in term_amounts.values()),
     }
 
 

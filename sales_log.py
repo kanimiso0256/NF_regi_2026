@@ -16,6 +16,14 @@ import re
 from datetime import datetime
 
 COUNT_ACTIONS = ("Add", "Sub", "加算", "減算")
+# 支払い方法。"paypay" は Square の枠（過去の CSV と合わせた名前）、"pp" は手で入力する PayPay
+PTYPES = ("cash", "pp", "paypay")
+
+
+def zero():
+    return {p: 0 for p in PTYPES}
+
+
 _AMOUNT = re.compile(r"¥(-?\d+)")
 
 
@@ -75,7 +83,7 @@ def read_rows(log_path):
 
 
 def term_amounts(log_path, prices):
-    """期間ごと・商品ごと・支払い方法ごとの売上金額 {期間: {商品名: {"cash": 円, "paypay": 円}}}。
+    """期間ごと・商品ごと・支払い方法ごとの売上金額 {期間: {商品名: {"cash": 円, "paypay": 円, "pp": 円}}}。
 
     Tkinter 版のリセット（ResetData・Factory Reset）があれば、そこまでの分は数えない
     （data_manager.verify_integrity と同じ扱い）
@@ -89,8 +97,8 @@ def term_amounts(log_path, prices):
             out.clear()
             continue
         e = parse_count_row(row)
-        if e is None or e["ptype"] not in ("cash", "paypay"):
+        if e is None or e["ptype"] not in PTYPES:
             continue
-        c = out.setdefault(e["term"], {}).setdefault(e["name"], {"cash": 0, "paypay": 0})
+        c = out.setdefault(e["term"], {}).setdefault(e["name"], zero())
         c[e["ptype"]] += amount_of(e, prices)
     return out
