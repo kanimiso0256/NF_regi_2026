@@ -30,7 +30,7 @@ import time
 import webbrowser
 from datetime import timedelta
 
-from flask import Flask, abort, jsonify, render_template, request, session
+from flask import Flask, abort, jsonify, render_template, request, session, url_for
 
 import analytics
 import share_sheet
@@ -54,6 +54,15 @@ def create_app(state, dev=False, lan=False, secret_key=None, sharer=None):
         SESSION_COOKIE_SAMESITE="Strict",
         PERMANENT_SESSION_LIFETIME=timedelta(days=7),
     )
+
+    @app.template_global()
+    def asset(filename):
+        """static のファイルの URL。更新日時を付けて、古い JS・CSS がブラウザに残らないようにする"""
+        try:
+            v = int(os.path.getmtime(os.path.join(app.static_folder, filename)))
+        except OSError:
+            v = 0
+        return url_for("static", filename=filename, v=v)
 
     @app.before_request
     def require_json_for_post():
