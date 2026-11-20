@@ -265,7 +265,8 @@ async function startOperation(mode) {
 function enterRegister(fresh = false) {
     if (fresh) {
         ui.drafts = {};
-        resetHistory();
+        // 親機を起動し直す前の古い画面（history.js がない）でも止まらないようにする
+        if (typeof resetHistory === "function") resetHistory();
     }
     ui.cardsKey = "";
     $("reg-idle").hidden = true;
@@ -295,7 +296,7 @@ function renderRegister() {
     updateCards();
     updateDraftBar();
     onRegisterSquareState();
-    updateHistory(s);   // 右の「直近の会計」（history.js）
+    if (typeof updateHistory === "function") updateHistory(s);   // 右の「直近の会計」（history.js）
 }
 
 async function confirmExit() {
