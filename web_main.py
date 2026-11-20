@@ -262,6 +262,10 @@ def create_app(state, dev=False, lan=False, secret_key=None, sharer=None):
         state.change_operator(t, body().get("name"))
         return jsonify(state.snapshot(t))
 
+    @app.get("/pc/api/history")
+    def get_history():
+        return jsonify(state.history(me()))
+
     @app.post("/pc/api/commit")
     def post_commit():
         t = me()

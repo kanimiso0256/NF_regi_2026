@@ -165,6 +165,18 @@
                         <div class="cards" id="cards"></div>
                     </div>
 
+                    <!-- 直近の会計（表示だけ。history.js）。collapsed はスマホのときだけ効く（見出しを押して開く） -->
+                    <aside class="panel reg-history collapsed" id="reg-history">
+                        <div class="hist-head" id="hist-head">
+                            <div>
+                                <p class="eyebrow">HISTORY</p>
+                                <h3 class="hist-title">直近の会計</h3>
+                            </div>
+                            <span class="hist-count" id="hist-count"></span>
+                        </div>
+                        <ul class="hist-list" id="hist-list"></ul>
+                    </aside>
+
                     <div class="panel draft-bar" id="draft-bar">
                         <span id="draft-summary"></span>                        <button class="btn btn-primary" id="commit-btn" data-action="commit">確定</button>
                     </div>
@@ -192,10 +204,11 @@
         <div class="modal" id="modal-body"></div>
     </div>
 
-    <!-- dashboard.js / settings.js / square.js の関数を register.js から呼ぶので、register.js を最後に読み込む -->
+    <!-- dashboard.js / settings.js / square.js / history.js の関数を register.js から呼ぶので、register.js を最後に読み込む -->
     <script src="{{ asset('dashboard.js') }}"></script>
     <script src="{{ asset('settings.js') }}"></script>
     <script src="{{ asset('square.js') }}"></script>
+    <script src="{{ asset('history.js') }}"></script>
     <script src="{{ asset('register.js') }}"></script>
     {% if dev %}
     <script>
