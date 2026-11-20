@@ -102,3 +102,63 @@ def term_amounts(log_path, prices):
         c = out.setdefault(e["term"], {}).setdefault(e["name"], zero())
         c[e["ptype"]] += amount_of(e, prices)
     return out
+
+
+# ---------- 会計の履歴 ----------
+COMMIT_ACTIONS = ("CommitOrder", "SquareImport")
+
+
+def history_entry(ts, kind, by, terminal, items):
+    """履歴の 1 件。items は [{"name", "ptype", "qty", "amount"}]"""
+    return {
+        "ts": ts,
+        "time": ts[11:16],
+        "kind": kind,          # "pc"（レジで確定）/ "square"（Square から取り込み）
+        "by": by,
+        "terminal": terminal,
+        "items": items,
+        "qty": sum(i["qty"] for i in items),
+        "amount": sum(i["amount"] for i in items),
+    }
+
+
+def term_history(log_path, prices):
+    """期間ごとの会計の履歴 {期間: [履歴, ...]}（古い順）。
+
+    CommitOrder / SquareImport の直後に続く Add/Sub を 1 件の会計にまとめる（analytics.py と同じ）。
+    会計の行がない Add/Sub（Tkinter 版の記録など）は 1 行を 1 件とする。
+    リセット（ResetData・Factory Reset）があれば、そこまでの分は出さない
+    """
+    out = {}
+    current = None   # まとめている会計 {"term", "ts", "kind", "by", "terminal", "items"}
+
+    def close():
+        nonlocal current
+        if current and current["items"]:
+            out.setdefault(current["term"], []).append(history_entry(
+                current["ts"], current["kind"], current["by"], current["terminal"], current["items"]))
+        current = None
+
+    for row in read_rows(log_path):
+        if len(row) < 7:
+            continue
+        ts, user, terminal, term, action = row[:5]
+        e = parse_count_row(row)
+        if e is None:
+            close()
+            if action == "ResetData":
+                out.pop(row[5].replace(".csv", ""), None)
+            elif action == "Factory Reset":
+                out.clear()
+            elif action in COMMIT_ACTIONS:
+                current = {"term": term, "ts": ts, "by": user, "terminal": terminal, "items": [],
+                           "kind": "square" if action == "SquareImport" else "pc"}
+            continue
+        item = {"name": e["name"], "ptype": e["ptype"], "qty": e["qty"], "amount": amount_of(e, prices)}
+        if current is not None and current["term"] == e["term"]:
+            current["items"].append(item)
+        else:
+            close()
+            out.setdefault(e["term"], []).append(history_entry(ts, "pc", user, terminal, [item]))
+    close()
+    return out

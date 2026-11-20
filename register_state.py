@@ -77,6 +77,9 @@ class RegisterState:
         self._counts = {}             # 期間 → {商品名: {"cash": 個数, "pp": 個数, "paypay": 個数}}（CSV を読んだもの）
         self._amounts = None          # 期間 → {商品名: {支払い方法: 円}}（ログから集計。初めて使うときに読む）
         self._test_amounts = {}       # テストの金額（テストの個数と同じく保存しない）
+        self._history = None          # 期間 → 会計の履歴（古い順。ログから作る。初めて使うときに読む）
+        self._test_history = []       # テストの会計の履歴（保存しない）
+        self._history_rev = 0         # 履歴が増える・消えるたびに 1 増やす（画面が読み直すかの目印）
         self._admin_tokens = set()
 
         # 毎秒の状態取得で settings.json を読み書きしないよう、メニューなどは読んでおく
@@ -406,13 +409,16 @@ class RegisterState:
         names = {m["name"] for m in self._visible_menu()}
         added = 0
         unmatched = []
+        history = []
         for name, qty, amount in lines:
             if name in names:
                 # 金額は Square で実際に払われた金額（レジのメニューの値段ではなく）
                 self._apply_count(term, name, ptype, qty, amount, by="Square", user="Square", terminal="Square")
+                history.append({"name": name, "ptype": ptype, "qty": qty, "amount": amount})
                 added += qty
             else:
                 unmatched.append((name, qty, amount))
+        self._add_history(term, "square", "Square", "Square", history)
         # メニューにない商品・金額だけ打った会計は、画面に出して手で入力してもらう。
         # 集計（analytics.py）は SquareImport の直後に続く Add/Sub を 1 件の会計とみなすので、Add/Sub の後に書く
         for name, qty, amount in unmatched:
@@ -524,6 +530,8 @@ class RegisterState:
             if mode == TEST_TERM and not any(x.active and x.is_test for x in self.terminals.values() if x is not t):
                 self._counts[TEST_TERM] = {}
                 self._test_amounts = {}
+                self._test_history = []
+                self._history_rev += 1
             t.operator = operator
             t.mode = mode
             t.active = True
@@ -577,7 +585,41 @@ class RegisterState:
             for name, ptype, qty in changes:
                 self._apply_count(t.mode, name, ptype, qty, qty * prices[name],
                                   by=t.operator, user=t.operator, terminal=t.name)
+            self._add_history(t.mode, "pc", t.operator, t.name,
+                              [{"name": n, "ptype": p, "qty": q, "amount": q * prices[n]} for n, p, q in changes])
             self._save_term(t.mode)
+
+    # ---------- 会計の履歴 ----------
+    HISTORY_LIMIT = 300   # 画面に送る件数（新しい方から）
+
+    def history(self, t):
+        """販売中の期間の会計の履歴（新しい順）"""
+        with self._lock:
+            self._require_active(t)
+            entries = self._term_history(t.mode)
+            return {
+                "term": t.mode,
+                "rev": self._history_rev,
+                "count": len(entries),
+                "entries": list(reversed(entries[-self.HISTORY_LIMIT:])),
+            }
+
+    def _term_history(self, term):
+        if term == TEST_TERM:
+            return self._test_history
+        if self._history is None:
+            prices = {m["name"]: int(m.get("price", 0)) for m in self._conf["menu"]}
+            self._history = sales_log.term_history(self.dm.log_path, prices)
+            self._history.pop(TEST_TERM, None)   # テストの記録は親機を起動し直したら出さない（個数と同じ）
+        return self._history.setdefault(term, [])
+
+    def _add_history(self, term, kind, by, terminal, items):
+        """確定・取り込みした会計を履歴に足す（ロックを持って呼ぶ）"""
+        if not items:
+            return
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+        self._term_history(term).append(sales_log.history_entry(ts, kind, by, terminal, items))
+        self._history_rev += 1
 
     # ---------- 画面用スナップショット ----------
     def snapshot(self, t):
@@ -595,6 +637,7 @@ class RegisterState:
                 "card_width": self._conf["card_width"],
                 "items": items,
                 "totals": totals,
+                "history_rev": self._history_rev,
                 "square": {
                     **self._sq_status,
                     "unmatched": sum(1 for u in self._sq_unmatched if u["term"] == t.mode),

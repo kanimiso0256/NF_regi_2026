@@ -794,6 +794,35 @@ kbd {
 
 .empty { margin: auto; color: var(--label); }
 
+/* ---------- 直近の会計（右の列。history.js） ----------
+   上の帯と未確定バーは横いっぱい、その間を「商品」と「直近の会計」の 2 列にする */
+.reg-body { grid-template-columns: minmax(0, 1fr) clamp(260px, 24vw, 340px); }
+.reg-head, .draft-bar { grid-column: 1 / -1; }
+.reg-history { padding: 0; overflow: hidden; }
+.hist-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; padding: clamp(8px, 1.4vh, 14px) 16px 8px; border-bottom: 1px solid var(--line); }
+.hist-head .eyebrow { margin: 0 0 2px; font-size: 11px; }
+.hist-title { margin: 0; font-size: 15px; font-weight: 500; }
+.hist-count { color: var(--label); font-size: 13px; }
+.hist-list { flex: 1; min-height: 0; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.hist-item { padding: 9px 16px; border-bottom: 1px solid #eef1f3; cursor: pointer; }
+.hist-item:hover { background: #fafbfc; }
+.hist-top { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.hist-time { color: var(--ink); font-variant-numeric: tabular-nums; }
+.hist-who { overflow: hidden; color: var(--label); text-overflow: ellipsis; white-space: nowrap; }
+.hist-amount { flex-shrink: 0; margin-left: auto; font-size: 15px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.hist-items { margin-top: 2px; overflow: hidden; color: #555; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.hist-item.open .hist-items { white-space: normal; }
+.hist-item.minus .hist-amount, .hist-item.minus .hist-items { color: var(--down); }
+.hist-detail { display: none; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); font-size: 12px; }
+.hist-item.open .hist-detail { display: block; }
+.hist-line { display: flex; justify-content: space-between; gap: 8px; padding: 1px 0; font-variant-numeric: tabular-nums; }
+.hist-line-pt { color: var(--label); }
+.hist-empty { padding: 24px 16px; color: var(--label); font-size: 13px; text-align: center; }
+.hist-pt { flex-shrink: 0; padding: 1px 6px; border-radius: 3px; font-size: 11px; white-space: nowrap; }
+.hist-pt-cash { color: var(--cash); background: var(--cash-bg); }
+.hist-pt-pp { color: var(--pp); background: var(--pp-bg); }
+.hist-pt-sq { color: var(--pay); background: var(--pay-bg); }
+
 /* ---------- 未確定バー ---------- */
 .draft-bar {
     display: flex;
@@ -958,11 +987,24 @@ kbd {
 
     .draft-bar { gap: 8px; padding: 8px 12px; }
     #draft-summary { font-size: 13px; }
+
+    /* 直近の会計：商品の下に見出しだけ出し、押すと開く（開いても商品のカードが隠れきらない高さまで） */
+    .reg-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto auto; }
+    .hist-head { padding: 8px 12px; cursor: pointer; }
+    .hist-head .eyebrow { display: none; }
+    .hist-title::after { content: " ▲"; color: var(--label); font-size: 11px; }
+    .reg-history.collapsed .hist-title::after { content: " ▼"; }
+    .reg-history.collapsed .hist-list { display: none; }
+    .reg-history.collapsed .hist-head { border-bottom: none; }
+    .hist-list { max-height: 28vh; }
+    .hist-item { padding: 8px 12px; }
+    .products { min-height: 150px; }
     .draft-bar .btn-primary { padding: 12px 24px; }
 
     /* ダッシュボード：1 列で縦にスクロール */
     .dash-grid { min-height: 0; grid-auto-rows: minmax(340px, auto); gap: 8px; padding: 8px; }
     .panel { padding: 16px; }
+    .reg-history { padding: 0; }
 
     /* 設定 */
     .settings-body { padding: 12px 8px 24px; }
