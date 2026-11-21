@@ -27,15 +27,23 @@ def zero():
 _AMOUNT = re.compile(r"¥(-?\d+)")
 
 
-def format_value(qty, amount, new_val, by):
-    """個数の増減の行の Value 欄（先頭は個数。data_manager.verify_integrity も先頭だけを読む）"""
-    return f"{qty:+d} ¥{amount} (Term: {new_val}) by {by}"
+_DISCOUNT = re.compile(r"\(割引 ¥(-?\d+)\)$")
+
+
+def format_value(qty, amount, new_val, by, discount=0):
+    """個数の増減の行の Value 欄（先頭は個数。data_manager.verify_integrity も先頭だけを読む）。
+
+    Square で割引した分は、最後に「(割引 ¥100)」を付ける（金額は割引のあとの金額）
+    """
+    value = f"{qty:+d} ¥{amount} (Term: {new_val}) by {by}"
+    return value + (f" (割引 ¥{discount})" if discount else "")
 
 
 def parse_count_row(row):
     """ログの 1 行が個数の増減なら、その内容を返す（それ以外は None）。
 
-    {"ts", "term", "name", "ptype", "qty", "amount"}。amount は金額が書かれていない行では None
+    {"ts", "term", "name", "ptype", "qty", "amount", "discount"}。amount は金額が書かれていない行では None、
+    discount は割引の書かれていない行では 0
     """
     if len(row) < 7:
         return None
@@ -53,8 +61,9 @@ def parse_count_row(row):
         m = _AMOUNT.fullmatch(words[1])
         if m:
             amount = int(m.group(1))
+    m = _DISCOUNT.search(value)
     return {"ts": ts, "term": term, "name": name, "ptype": ptype.rstrip("]").lower(),
-            "qty": qty, "amount": amount}
+            "qty": qty, "amount": amount, "discount": int(m.group(1)) if m else 0}
 
 
 def amount_of(entry, prices):
@@ -109,7 +118,7 @@ COMMIT_ACTIONS = ("CommitOrder", "SquareImport")
 
 
 def history_entry(ts, kind, by, terminal, items):
-    """履歴の 1 件。items は [{"name", "ptype", "qty", "amount"}]"""
+    """履歴の 1 件。items は [{"name", "ptype", "qty", "amount", "discount"}]（discount は Square の割引額。なければ 0）"""
     return {
         "ts": ts,
         "time": ts[11:16],
@@ -119,6 +128,7 @@ def history_entry(ts, kind, by, terminal, items):
         "items": items,
         "qty": sum(i["qty"] for i in items),
         "amount": sum(i["amount"] for i in items),
+        "discount": sum(i.get("discount", 0) for i in items),
     }
 
 
@@ -154,7 +164,8 @@ def term_history(log_path, prices):
                 current = {"term": term, "ts": ts, "by": user, "terminal": terminal, "items": [],
                            "kind": "square" if action == "SquareImport" else "pc"}
             continue
-        item = {"name": e["name"], "ptype": e["ptype"], "qty": e["qty"], "amount": amount_of(e, prices)}
+        item = {"name": e["name"], "ptype": e["ptype"], "qty": e["qty"], "amount": amount_of(e, prices),
+                "discount": e["discount"]}
         if current is not None and current["term"] == e["term"]:
             current["items"].append(item)
         else:
