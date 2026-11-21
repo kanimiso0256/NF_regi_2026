@@ -40,6 +40,56 @@ from register_state import RegisterError, RegisterState
 PORT = 5002
 SQUARE_SYNC_SEC = 15   # Square の会計を取り込む間隔
 LOCAL_ADDRS = ("127.0.0.1", "::1")
+LOCK_FILE = "register.lock"   # system_data の中。動いているレジがこのファイルをつかんでおく
+
+ALREADY_RUNNING = """
+================================================================
+  レジはすでにこの PC で起動しています。
+  2 つ同時に動かすと、Square の会計を二重に取り込むなど売上がずれるので、
+  この起動は止めました。
+
+  ・すでに開いている黒いウィンドウ（レジ起動（親機））をそのまま使ってください。
+  ・起動し直したいときは、そのウィンドウを閉じてから、もう一度起動してください。
+================================================================
+"""
+
+PORT_IN_USE = """
+================================================================
+  ポート {port} をほかのアプリが使っているため、レジを起動できません。
+  そのアプリを閉じてから、もう一度起動してください。
+================================================================
+"""
+
+_lock_handle = None   # レジが動いている間ずっと開いておく（閉じるとロックが外れる）
+
+
+def acquire_single_instance(system_dir):
+    """同じデータ（system_data）を使うレジが、ほかに動いていないか確かめてロックする。
+
+    ほかで動いていれば False。ロックはプロセスが終わると OS が外すので、強制終了しても残らない
+    """
+    global _lock_handle
+    f = open(os.path.join(system_dir, LOCK_FILE), "a+")
+    try:
+        if os.name == "nt":
+            import msvcrt
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        return False
+    _lock_handle = f
+    return True
+
+
+def port_in_use(port):
+    """ほかのアプリがこのポートで待ち受けているか（Windows では同じポートで 2 つ起動できてしまうため）"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        return s.connect_ex(("127.0.0.1", port)) == 0
 
 
 def create_app(state, dev=False, lan=False, secret_key=None, sharer=None):
@@ -304,6 +354,13 @@ def secret_key(dm):
 def main():
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
     dm = DataManager()
+    # 二重起動を防ぐ（ログに書く前に確かめる）
+    if not acquire_single_instance(dm.system_dir):
+        print(ALREADY_RUNNING)
+        sys.exit(1)
+    if port_in_use(PORT):
+        print(PORT_IN_USE.format(port=PORT))
+        sys.exit(1)
     dm.log_action("System", "System", "Startup", "WebApp", "Launched")
     dev = "--dev" in sys.argv
     lan = "--lan" in sys.argv

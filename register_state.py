@@ -21,7 +21,8 @@ from types import SimpleNamespace
 
 import analytics
 import sales_log
-from square_api import API_BASE, SquareClient, SquareError, SquareReconciler, load_config, order_lines
+from square_api import (API_BASE, SquareClient, SquareError, SquareReconciler, attach_source_tenders, load_config,
+                        order_lines)
 
 PTYPES = sales_log.PTYPES
 # "paypay" は Square の枠（過去の CSV と合わせた名前）。"pp" は Square を通さずに受けて手で入力する PayPay
@@ -383,6 +384,10 @@ class RegisterState:
         try:
             client = SquareClient(conf["access_token"], conf["environment"], conf["location_id"])
             orders = client.search_orders(begin, now) if begin < now else []
+            with self._lock:
+                imported = set(self._sq_imported)
+            # 返品だけの会計は、元の会計が現金かどうかを調べてから取り込む（まだ取り込んでいない分だけ）
+            attach_source_tenders(orders, client, skip=imported)
         except SquareError as e:
             return self._set_sq_status("error", str(e))
 

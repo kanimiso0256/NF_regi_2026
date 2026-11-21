@@ -156,6 +156,14 @@ class SquareClient:
             self.location_id = self._get("/v2/locations/main")["location"]["id"]
         return self.location_id
 
+    def retrieve_orders(self, order_ids):
+        """会計（注文）を ID で取り出す（返品の元の会計を調べるとき）"""
+        if not order_ids:
+            return []
+        data = self._post("/v2/orders/batch-retrieve",
+                          {"location_id": self.resolve_location_id(), "order_ids": list(order_ids)})
+        return data.get("orders", [])
+
     def search_orders(self, begin, end):
         """begin〜end に完了した会計（注文）を、完了した順にすべて返す"""
         body = {
@@ -211,15 +219,47 @@ def _add(d, key, amount):
     d[key] = d.get(key, 0) + amount
 
 
+def refund_sources(order):
+    """支払いの情報がない返品の会計なら、元の会計の ID（なければ None）"""
+    if order.get("tenders"):
+        return None
+    for r in order.get("returns") or []:
+        if r.get("source_order_id"):
+            return r["source_order_id"]
+    return None
+
+
+def attach_source_tenders(orders, client, skip=()):
+    """返品の会計に、元の会計の支払い（tenders）を source_tenders として付ける。
+
+    skip（取り込み済みの会計 ID）の会計は調べない。元の会計が orders の中になければ
+    Square に問い合わせる（SquareError はそのまま投げる）
+    """
+    need = {o["id"]: refund_sources(o) for o in orders if o.get("id") and o["id"] not in skip}
+    need = {oid: src for oid, src in need.items() if src}
+    if not need:
+        return
+    known = {o["id"]: o for o in orders if o.get("id")}
+    missing = sorted({src for src in need.values() if src not in known})
+    for o in client.retrieve_orders(missing) if missing else []:
+        known[o["id"]] = o
+    for o in orders:
+        src = need.get(o.get("id"))
+        if src and src in known:
+            o["source_tenders"] = known[src].get("tenders") or []
+
+
 def order_lines(order):
     """会計 1 件を (支払い方法, [(商品名, 個数, 金額, 割引額), ...]) にする。返品は個数・金額・割引額がマイナス。
 
     金額は割引のあとの金額（Square の total_money）。割引額は Square の total_discount_money
     （会計全体に付けた割引も、Square が商品ごとに割り振った分が入る）。
 
-    支払い方法は、すべて現金で払われていれば "cash"、それ以外は Square の枠（"paypay"）
+    支払い方法は、すべて現金で払われていれば "cash"、それ以外は Square の枠（"paypay"）。
+    返品だけの会計には支払いの情報（tenders）がないので、元の会計の支払い（source_tenders。
+    attach_source_tenders で付ける）で決める（現金で売ったものの返品は現金から引く）
     """
-    tenders = order.get("tenders") or []
+    tenders = order.get("tenders") or order.get("source_tenders") or []
     ptype = "cash" if tenders and all(t.get("type") == "CASH" for t in tenders) else SQUARE_PTYPE
 
     def qty_of(li):
