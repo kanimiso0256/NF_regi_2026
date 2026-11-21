@@ -813,6 +813,8 @@ kbd {
 .hist-items { margin-top: 2px; overflow: hidden; color: #555; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .hist-item.open .hist-items { white-space: normal; }
 .hist-item.minus .hist-amount, .hist-item.minus .hist-items { color: var(--down); }
+.hist-discount { margin-top: 2px; color: var(--down); font-size: 12px; }
+.hist-line-discount { margin-right: 8px; color: var(--down); }
 .hist-detail { display: none; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); font-size: 12px; }
 .hist-item.open .hist-detail { display: block; }
 .hist-line { display: flex; justify-content: space-between; gap: 8px; padding: 1px 0; font-variant-numeric: tabular-nums; }

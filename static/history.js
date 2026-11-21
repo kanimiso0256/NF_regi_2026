@@ -85,10 +85,11 @@ function renderHistory() {
                 <strong class="hist-amount">${minus ? "−" : ""}${yen(Math.abs(e.amount))}</strong>
             </div>
             <div class="hist-items">${minus ? "取消・修正 " : ""}${histItemsText(e)}</div>
+            ${e.discount ? `<div class="hist-discount">割引 ${e.discount < 0 ? "+" : "−"}${yen(Math.abs(e.discount))}</div>` : ""}
             <div class="hist-detail">
                 ${e.items.map((i) => `<div class="hist-line">
                     <span>${esc(i.name)} <span class="hist-line-pt">${esc((HIST_PTYPE[i.ptype] || [i.ptype])[0])}</span> × ${i.qty}</span>
-                    <span>${i.amount < 0 ? "−" : ""}${yen(Math.abs(i.amount))}</span>
+                    <span>${i.discount ? `<span class="hist-line-discount">割引 ${i.discount < 0 ? "+" : "−"}${yen(Math.abs(i.discount))}</span>` : ""}${i.amount < 0 ? "−" : ""}${yen(Math.abs(i.amount))}</span>
                 </div>`).join("")}
             </div>
         </li>`;

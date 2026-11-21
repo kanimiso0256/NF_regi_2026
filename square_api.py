@@ -212,7 +212,10 @@ def _add(d, key, amount):
 
 
 def order_lines(order):
-    """会計 1 件を (支払い方法, [(商品名, 個数, 金額), ...]) にする。返品は個数・金額がマイナス。
+    """会計 1 件を (支払い方法, [(商品名, 個数, 金額, 割引額), ...]) にする。返品は個数・金額・割引額がマイナス。
+
+    金額は割引のあとの金額（Square の total_money）。割引額は Square の total_discount_money
+    （会計全体に付けた割引も、Square が商品ごとに割り振った分が入る）。
 
     支払い方法は、すべて現金で払われていれば "cash"、それ以外は Square の枠（"paypay"）
     """
@@ -231,10 +234,15 @@ def order_lines(order):
     def amount_of(li):
         return (li.get("total_money") or {}).get("amount", 0)
 
-    lines = [(name_of(li, "金額指定"), qty_of(li), amount_of(li)) for li in order.get("line_items") or []]
+    def discount_of(li):
+        return (li.get("total_discount_money") or {}).get("amount", 0)
+
+    lines = [(name_of(li, "金額指定"), qty_of(li), amount_of(li), discount_of(li))
+             for li in order.get("line_items") or []]
     # 金額だけで返金すると、商品名のない返品になる（「取り込めなかった会計」に「返金」として出す）
     for ret in order.get("returns") or []:
-        lines += [(name_of(li, "返金"), -qty_of(li), -amount_of(li)) for li in ret.get("return_line_items") or []]
+        lines += [(name_of(li, "返金"), -qty_of(li), -amount_of(li), -discount_of(li))
+                  for li in ret.get("return_line_items") or []]
     return ptype, [line for line in lines if line[1] != 0]
 
 

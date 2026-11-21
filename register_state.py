@@ -403,21 +403,22 @@ class RegisterState:
         ptype, lines = order_lines(order)
         oid = order["id"]
         closed = _local_time(order.get("closed_at"))
-        total = sum(amount for _, _, amount in lines)
+        total = sum(amount for _, _, amount, _ in lines)
         when = f"{closed:%Y-%m-%d %H:%M:%S} " if closed else ""
         self._log("Square", term, "SquareImport", oid, f"{when}合計 ¥{total:,}", "Square")
         names = {m["name"] for m in self._visible_menu()}
         added = 0
         unmatched = []
         history = []
-        for name, qty, amount in lines:
+        for name, qty, amount, discount in lines:
             if name in names:
-                # 金額は Square で実際に払われた金額（レジのメニューの値段ではなく）
-                self._apply_count(term, name, ptype, qty, amount, by="Square", user="Square", terminal="Square")
-                history.append({"name": name, "ptype": ptype, "qty": qty, "amount": amount})
+                # 金額は Square で実際に払われた金額（割引のあと。レジのメニューの値段ではなく）
+                self._apply_count(term, name, ptype, qty, amount, by="Square", user="Square", terminal="Square",
+                                  discount=discount)
+                history.append({"name": name, "ptype": ptype, "qty": qty, "amount": amount, "discount": discount})
                 added += qty
             else:
-                unmatched.append((name, qty, amount))
+                unmatched.append((name, qty, amount))  # 割引額は出さない（手で入れるときは金額だけ見ればよい）
         self._add_history(term, "square", "Square", "Square", history)
         # メニューにない商品・金額だけ打った会計は、画面に出して手で入力してもらう。
         # 集計（analytics.py）は SquareImport の直後に続く Add/Sub を 1 件の会計とみなすので、Add/Sub の後に書く
@@ -716,15 +717,15 @@ class RegisterState:
         if not t.active:
             raise RegisterError("販売モードではありません")
 
-    def _apply_count(self, term, name, ptype, qty, amount, by, user, terminal):
-        """個数を qty 増やし、売上の金額を amount 円足す（どちらもマイナスなら減らす）"""
+    def _apply_count(self, term, name, ptype, qty, amount, by, user, terminal, discount=0):
+        """個数を qty 増やし、売上の金額を amount 円足す（どちらもマイナスなら減らす）。discount は Square の割引額（記録に残すだけ）"""
         c = self._term_counts(term).setdefault(name, sales_log.zero())
         a = self._term_amounts(term).setdefault(name, sales_log.zero())
         c.setdefault(ptype, 0)
         a.setdefault(ptype, 0)
         new_val = c[ptype] + qty
         action = "Add" if qty > 0 else "Sub"
-        self._log(user, term, action, f"{name} [{ptype}]", sales_log.format_value(qty, amount, new_val, by), terminal)
+        self._log(user, term, action, f"{name} [{ptype}]", sales_log.format_value(qty, amount, new_val, by, discount), terminal)
         c[ptype] = new_val
         a[ptype] += amount
 
