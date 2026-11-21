@@ -561,11 +561,15 @@ class RegisterState:
             prices = {m["name"]: int(m.get("price", 0)) for m in self._visible_menu()}
             names = set(prices)
             counts = self._term_counts(t.mode)
-            changes = []
+            changes = []   # (商品名, 支払い方法, 個数, 金額, 料金を手入力したか)
             for d in drafts or []:
                 name = d.get("name")
                 if name not in names:
                     raise RegisterError(f"商品が見つかりません: {name}")
+                # 料金を手で入れた段は amount に {支払い方法: その段の金額の合計} が入る（ない段は 値段 × 個数）
+                custom = d.get("amount") or {}
+                if not isinstance(custom, dict):
+                    raise RegisterError("料金が正しくありません")
                 for ptype in PTYPES:
                     try:
                         qty = int(d.get(ptype) or 0)
@@ -576,17 +580,20 @@ class RegisterState:
                     now = counts.get(name, {}).get(ptype, 0)
                     if not t.allow_negative and now + qty < 0:
                         raise RegisterError(f"{name}（{PTYPE_JP[ptype]}）の個数がマイナスになります")
-                    changes.append((name, ptype, qty))
+                    manual = custom.get(ptype) is not None
+                    amount = _custom_amount(custom[ptype], qty, name, ptype) if manual else qty * prices[name]
+                    changes.append((name, ptype, qty, amount, manual))
             if not changes:
                 raise RegisterError("確定する商品がありません")
 
-            lines = [f"・{n} ({PTYPE_JP[p]}) x{q:+d}" for n, p, q in changes]
+            lines = [f"・{n} ({PTYPE_JP[p]}) x{q:+d}" + (f" ¥{a:,}（料金を手入力）" if m else "")
+                     for n, p, q, a, m in changes]
             self._log(t.operator, t.mode, "CommitOrder", "PC", f"合計 {len(changes)}種\n" + "\n".join(lines), t.name)
-            for name, ptype, qty in changes:
-                self._apply_count(t.mode, name, ptype, qty, qty * prices[name],
+            for name, ptype, qty, amount, _ in changes:
+                self._apply_count(t.mode, name, ptype, qty, amount,
                                   by=t.operator, user=t.operator, terminal=t.name)
             self._add_history(t.mode, "pc", t.operator, t.name,
-                              [{"name": n, "ptype": p, "qty": q, "amount": q * prices[n]} for n, p, q in changes])
+                              [{"name": n, "ptype": p, "qty": q, "amount": a} for n, p, q, a, _ in changes])
             self._save_term(t.mode)
 
     # ---------- 会計の履歴 ----------
@@ -624,7 +631,8 @@ class RegisterState:
     # ---------- 画面用スナップショット ----------
     def snapshot(self, t):
         with self._lock:
-            items, totals = self._items_for(t.mode) if t.active else ([], {"qty": 0, "term": 0, "cumulative": 0, "total": 0})
+            items, totals = self._items_for(t.mode) if t.active else (
+                [], {"qty": 0, "qty_food": 0, "qty_drink": 0, "term": 0, "cumulative": 0, "total": 0})
             return {
                 "logged_in": True,
                 "terminal_user": t.name,
@@ -684,9 +692,12 @@ class RegisterState:
         def amount_sum(term_list):
             return sum(yen(c) for x in term_list for c in self._term_amounts(x).values())
 
-        # 合計個数は、この期間に売れた個数（全商品・全支払い方法）
-        qty = sum(sum(c.values()) for c in self._term_counts(mode).values())
-        totals = {"qty": qty, "term": amount_sum([mode]), "cumulative": amount_sum(running), "total": amount_sum(everything)}
+        # 個数は、この期間に売れた個数（全支払い方法）。麻辣湯とドリンクに分けて出す（トッピングはどちらにも入れない）
+        qty = {"food": 0, "drink": 0, "topping": 0}
+        for name, c in self._term_counts(mode).items():
+            qty[item_category(name)] += sum(c.values())
+        totals = {"qty": sum(qty.values()), "qty_food": qty["food"], "qty_drink": qty["drink"],
+                  "term": amount_sum([mode]), "cumulative": amount_sum(running), "total": amount_sum(everything)}
         return items, totals
 
     # ---------- 内部処理 ----------
@@ -732,6 +743,35 @@ class RegisterState:
             return
         rows = [SimpleNamespace(name=name, counts={"term": c}) for name, c in self._term_counts(term).items()]
         self.dm.save_csv_data(f"{term}.csv", rows)
+
+
+MAX_CUSTOM_AMOUNT = 1_000_000   # 手入力の料金の上限（打ち間違いで桁が増えたときのため）
+
+
+def _custom_amount(value, qty, name, ptype):
+    """手で入れた料金を確かめて整数にする。個数がプラスなら 0 円以上、マイナス（取消）なら 0 円以下"""
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise RegisterError(f"{name}（{PTYPE_JP[ptype]}）の料金が正しくありません")
+    try:
+        amount = int(value)
+    except (TypeError, ValueError):
+        raise RegisterError(f"{name}（{PTYPE_JP[ptype]}）の料金が正しくありません")
+    if isinstance(value, float) and value != amount:
+        raise RegisterError(f"{name}（{PTYPE_JP[ptype]}）の料金は円単位で入れてください")
+    if abs(amount) > MAX_CUSTOM_AMOUNT:
+        raise RegisterError(f"{name}（{PTYPE_JP[ptype]}）の料金が大きすぎます")
+    if (qty > 0 and amount < 0) or (qty < 0 and amount > 0):
+        raise RegisterError(f"{name}（{PTYPE_JP[ptype]}）の料金と個数のプラス・マイナスが合っていません")
+    return amount
+
+
+def item_category(name):
+    """商品の種類。名前に「麻辣湯」が入っていれば麻辣湯（割引も含む）、「トッピング」ならトッピング、ほかはドリンク"""
+    if "麻辣湯" in name:
+        return "food"
+    if "トッピング" in name:
+        return "topping"
+    return "drink"
 
 
 def _ago(sec):

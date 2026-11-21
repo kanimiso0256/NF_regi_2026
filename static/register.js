@@ -285,9 +285,11 @@ function renderRegister() {
     $("mode-note").textContent = s.is_test ? "保存されません" : s.allow_negative ? "マイナス入力可" : "";
     $("mode-note").dataset.kind = s.is_test ? "test" : s.allow_negative ? "adjust" : "";
     $("operator-name").textContent = s.operator;
-    // 親機を再起動する前の古い画面（合計個数の欄がない）でも止まらないようにする
-    const qtyEl = $("total-qty");
-    if (qtyEl) qtyEl.textContent = `${(s.totals.qty || 0).toLocaleString("ja-JP")}個`;
+    // 個数は麻辣湯とドリンクに分けて出す。親機を再起動する前の古い画面（欄がない）でも止まらないようにする
+    const qtyText = (n) => `${(n || 0).toLocaleString("ja-JP")}個`;
+    if ($("total-food")) $("total-food").textContent = qtyText(s.totals.qty_food);
+    if ($("total-drink")) $("total-drink").textContent = qtyText(s.totals.qty_drink);
+    if ($("total-qty")) $("total-qty").textContent = qtyText(s.totals.qty);
     $("total-term").textContent = yen(s.totals.term);
     $("total-cumulative").textContent = yen(s.totals.cumulative);
     $("total-total").textContent = yen(s.totals.total);
@@ -360,7 +362,8 @@ function cardHtml(it) {
                 <div><span>Term</span><b data-f="term">¥0</b></div>
                 <div><span>総合</span><b data-f="total">¥0</b></div>
             </div>
-            <div class="pay-rows">${row("cash", k.slice(0, 3))}${row("pp", ["", "", ""])}${row("paypay", k.slice(3, 6))}</div>
+            <!-- キーは 現金：小文字、PayPay：大文字（Shift）。Square は自動で取り込むのでキーなし -->
+            <div class="pay-rows">${row("cash", k.slice(0, 3))}${row("pp", k.slice(3, 6))}${row("paypay", ["", "", ""])}</div>
         </article>`;
 }
 
@@ -384,8 +387,10 @@ function updateCards() {
         for (const p of PTYPES) {
             f(`count-${p}`).textContent = it.term[p] || 0;
             const badge = f(`draft-${p}`);
-            badge.textContent = d[p] > 0 ? `+${d[p]}` : d[p] < 0 ? String(d[p]) : "";
+            const custom = d[p] !== 0 && adjOf(d, p) !== 0;
+            badge.textContent = (d[p] > 0 ? `+${d[p]}` : d[p] < 0 ? String(d[p]) : "") + (custom ? "*" : "");
             badge.className = "pay-draft" + (d[p] > 0 ? " pos" : d[p] < 0 ? " neg" : "");
+            badge.title = custom ? `料金を手入力：${yen(d[p] * it.price + adjOf(d, p))}` : "";
         }
         // 売上の金額はサーバーが記録した金額（売れたときの値段）。今の値段 × 個数ではない
         f("term").textContent = yen(it.amount.term);
@@ -403,6 +408,16 @@ function updateCards() {
 }
 
 // ---------- 未確定の入力（ドラフト） ----------
+// 料金を手で入れた段は、定価（値段 × 個数）との差を d.adj[支払い方法] に持つ（その段の金額 = 値段 × 個数 + 差）
+const adjOf = (d, p) => (d.adj && d.adj[p]) || 0;
+
+// 個数を 0 にしたとき・金額のプラスマイナスが個数と合わなくなったときは、手入力の料金をやめて定価に戻す
+function settleAdj(d, ptype, price) {
+    if (!d.adj || !d.adj[ptype]) return;
+    const sub = d[ptype] * price + d.adj[ptype];
+    if (d[ptype] === 0 || (d[ptype] > 0 && sub < 0) || (d[ptype] < 0 && sub > 0)) delete d.adj[ptype];
+}
+
 function addDraft(name, ptype, amount) {
     const item = ui.state.items.find((it) => it.name === name);
     if (!item) return;
@@ -410,13 +425,31 @@ function addDraft(name, ptype, amount) {
     const next = d[ptype] + amount;
     if (!ui.state.allow_negative && (item.term[ptype] || 0) + next < 0) return;
     d[ptype] = next;
+    settleAdj(d, ptype, item.price);
     refreshDrafts();
+}
+
+// qty 個を、合計 yenTotal 円で足す（料金を手で入れたとき）
+function addCustomDraft(name, ptype, qty, yenTotal) {
+    const item = ui.state.items.find((it) => it.name === name);
+    if (!item) return false;
+    const d = ui.drafts[name] || (ui.drafts[name] = emptyDraft());
+    const next = d[ptype] + qty;
+    if (!ui.state.allow_negative && (item.term[ptype] || 0) + next < 0) return false;
+    d[ptype] = next;
+    d.adj = d.adj || {};
+    d.adj[ptype] = adjOf(d, ptype) + (yenTotal - qty * item.price);
+    settleAdj(d, ptype, item.price);
+    refreshDrafts();
+    return true;
 }
 
 function moveDrafts(target) {
     for (const d of Object.values(ui.drafts)) {
         const sum = PTYPES.reduce((a, p) => a + d[p], 0);
+        const adj = PTYPES.reduce((a, p) => a + adjOf(d, p), 0);
         for (const p of PTYPES) d[p] = p === target ? sum : 0;
+        d.adj = adj ? { [target]: adj } : undefined;
     }
     refreshDrafts();
 }
@@ -430,8 +463,10 @@ function draftRows() {
     return ui.state.items.flatMap((it) => {
         const d = ui.drafts[it.name];
         if (!d) return [];
-        return PTYPES.filter((p) => d[p] !== 0)
-            .map((p) => ({ name: it.name, ptype: p, qty: d[p], subtotal: d[p] * it.price }));
+        return PTYPES.filter((p) => d[p] !== 0).map((p) => ({
+            name: it.name, ptype: p, qty: d[p],
+            subtotal: d[p] * it.price + adjOf(d, p), custom: adjOf(d, p) !== 0,
+        }));
     });
 }
 
@@ -453,9 +488,15 @@ function openPcSummary() {
     const rows = draftRows();
     if (!rows.length) return;
     summaryModal("注文内容の確認", `担当: ${ui.state.operator}`, rows, async () => {
+        // 料金を手で入れた段だけ、その段の金額の合計を amount で送る（ほかは親機が 値段 × 個数 で記録する）
         const drafts = ui.state.items
             .filter((it) => ui.drafts[it.name])
-            .map((it) => ({ name: it.name, ...ui.drafts[it.name] }));
+            .map((it) => {
+                const d = ui.drafts[it.name];
+                const amount = {};
+                for (const p of PTYPES) if (d[p] && adjOf(d, p)) amount[p] = d[p] * it.price + adjOf(d, p);
+                return { name: it.name, cash: d.cash, pp: d.pp, paypay: d.paypay, amount };
+            });
         applyState(await api("/pc/api/commit", { drafts }));
         ui.drafts = {};
         renderRegister();
@@ -556,7 +597,7 @@ function summaryModal(title, subtitle, rows, onConfirm) {
                     <td>${esc(r.name)}</td>
                     <td><span class="ptag ptag-${r.ptype}">${PTYPE_JP[r.ptype] || esc(r.ptype)}</span></td>
                     <td class="num">${r.qty}</td>
-                    <td class="num">${yen(r.subtotal)}</td>
+                    <td class="num">${yen(r.subtotal)}${r.custom ? '<span class="custom-mark">手入力</span>' : ""}</td>
                 </tr>`).join("")}
             </tbody>
         </table>
@@ -584,6 +625,114 @@ function summaryModal(title, subtitle, rows, onConfirm) {
 }
 
 function openNumpad(it, ptype) {
+    if (ptype === "paypay") openCountPad(it, ptype);
+    else openPricePad(it, ptype);
+}
+
+// 個数と料金を入れる（現金・PayPay）。料金を打たなければ定価（値段 × 個数）
+function openPricePad(it, ptype) {
+    const st = { qty: "1", yen: String(it.price), active: "yen", fresh: true, yenEdited: false };
+    const num = (v) => {
+        const n = parseInt(v, 10);
+        return Number.isNaN(n) ? 0 : n;
+    };
+    const render = () => {
+        const q = num(st.qty);
+        modalField("qty").textContent = st.qty;
+        modalField("yen").textContent = yen(num(st.yen));
+        for (const f of ["qty", "yen"]) modalField(`box-${f}`).classList.toggle("active", st.active === f);
+        const std = Math.abs(q) * it.price;
+        const diff = num(st.yen) - std;
+        modalField("note").textContent = !st.yenEdited || !diff
+            ? `定価 ${yen(std)}`
+            : `定価 ${yen(std)}（${diff > 0 ? "+" : "−"}${yen(Math.abs(diff))}）`;
+    };
+    const setField = (f) => {
+        st.active = f;
+        st.fresh = true;
+        render();
+    };
+    const press = (k) => {
+        const f = st.active;
+        let v = st[f];
+        if (k === "-") {
+            // マイナス（取消）は個数に付ける。料金は個数に合わせてマイナスとして記録する
+            st.qty = st.qty.startsWith("-") ? st.qty.slice(1) || "0" : st.qty === "0" ? "-" : "-" + st.qty;
+        } else {
+            if (k === "C") v = "0";
+            else if (k === "BS") v = st.fresh ? "0" : v.length > 1 ? v.slice(0, -1) : "0";
+            else if (st.fresh) v = k;
+            else if (v.replace("-", "").length < (f === "qty" ? 4 : 7)) v = v === "0" ? k : v === "-" ? "-" + k : v + k;
+            st[f] = v;
+            st.fresh = false;
+            if (f === "yen") st.yenEdited = true;
+        }
+        if (!st.yenEdited) st.yen = String(Math.abs(num(st.qty)) * it.price);
+        render();
+    };
+    const keys = ["7", "8", "9", "4", "5", "6", "1", "2", "3", "0", "-", "C"];
+    openModal(`
+        <div class="numpad-head numpad-${ptype}">
+            <span>${PTYPE_JP[ptype]} 入力</span>
+            <strong>${esc(it.name)}</strong>
+            <small>単価 @${it.price.toLocaleString()}</small>
+        </div>
+        <div class="price-pad">
+            <button class="price-box" data-modal="field" data-key="qty" data-f="box-qty">
+                <span>個数</span><b data-f="qty">1</b>
+            </button>
+            <button class="price-box" data-modal="field" data-key="yen" data-f="box-yen">
+                <span>料金（合計）</span><b data-f="yen">¥0</b>
+            </button>
+            <p class="price-note" data-f="note"></p>
+        </div>
+        <div class="numpad-keys">
+            ${keys.map((k) => `<button class="numpad-key" data-modal="press" data-key="${k}">${k}</button>`).join("")}
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-ghost" data-modal="cancel">閉じる</button>
+            <button class="btn btn-primary" data-modal="ok">追加</button>
+        </div>`, {
+        actions: {
+            press: (data) => press(data.key),
+            field: (data) => setField(data.key),
+            ok: () => {
+                const q = num(st.qty);
+                closeModal();
+                if (!q) return;
+                const total = Math.abs(num(st.yen));
+                if (!st.yenEdited || total === Math.abs(q) * it.price) addDraft(it.name, ptype, q);
+                else addCustomDraft(it.name, ptype, q, q < 0 ? -total : total);
+            },
+            cancel: closeModal,
+        },
+        onKey: (e) => {
+            if (/^[0-9-]$/.test(e.key)) {
+                press(e.key);
+                return true;
+            }
+            if (e.key === "Tab") {
+                e.preventDefault();
+                setField(st.active === "qty" ? "yen" : "qty");
+                return true;
+            }
+            if (e.key === "Backspace" || e.key === "Delete") {
+                e.preventDefault();
+                press("BS");
+                return true;
+            }
+            if (e.key === "c" || e.key === "C") {
+                press("C");
+                return true;
+            }
+            return false;
+        },
+    });
+    render();
+}
+
+// 個数だけを入れる（Square を直すとき）
+function openCountPad(it, ptype) {
     let value = "0";
     const parse = () => {
         const n = parseInt(value, 10);
@@ -657,8 +806,8 @@ function onKeyDown(e) {
     const handlers = {
         Enter: openPcSummary,
         F1: () => moveDrafts("cash"),
-        F2: () => (squareLocked() ? showToast(SQUARE_LOCKED_MSG) : moveDrafts("paypay")),
-        F3: () => moveDrafts("pp"),
+        F2: () => moveDrafts("pp"),
+        F3: () => (squareLocked() ? showToast(SQUARE_LOCKED_MSG) : moveDrafts("paypay")),
         Escape: confirmExit,
         Backspace: clearDrafts,
         Delete: clearDrafts,
@@ -673,12 +822,8 @@ function onKeyDown(e) {
         const idx = it.keys ? it.keys.indexOf(k) : -1;
         if (idx === -1) continue;
         e.preventDefault();
-        const ptype = idx < 3 ? "cash" : "paypay";
+        const ptype = idx < 3 ? "cash" : "pp";   // Shift を押したキーは PayPay
         const op = idx % 3;
-        if (ptype === "paypay" && op !== 1 && squareLocked()) {
-            showToast(SQUARE_LOCKED_MSG);
-            return;
-        }
         if (op === 0) addDraft(it.name, ptype, 1);
         else if (op === 1) openNumpad(it, ptype);
         else addDraft(it.name, ptype, -1);

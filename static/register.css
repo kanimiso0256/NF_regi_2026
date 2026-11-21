@@ -681,7 +681,7 @@ kbd {
 .total { min-width: 130px; padding: 0 20px; border-left: 1px solid var(--line); }
 .total .kpi-label { margin-bottom: 0; font-size: 12px; }
 .total .kpi { font-size: clamp(20px, 3vh, 28px); }
-.total-qty { min-width: 100px; }
+.total-qty { min-width: 96px; }
 /* レジ上部の Square 欄。取り込めなかった会計があるとき・エラーのときだけ押せる（一覧を開く・再試行） */
 .sq-check {
     margin: 0;
@@ -761,7 +761,7 @@ kbd {
     padding: clamp(4px, .8vh, 10px) 0;
 }
 .pay-row + .pay-row { border-top: 1px dashed var(--line); }
-.pay-title { display: flex; align-items: center; gap: 6px; color: var(--label); font-size: 12px; }
+.pay-title { display: flex; align-items: center; gap: 6px; color: var(--ink); font-size: 12px; }
 .pay-title::before { content: ""; width: 3px; height: 14px; }
 .pay-cash .pay-title::before { background: var(--cash); }
 .pay-paypay .pay-title::before { background: var(--pay); }
@@ -818,10 +818,12 @@ kbd {
 .hist-line { display: flex; justify-content: space-between; gap: 8px; padding: 1px 0; font-variant-numeric: tabular-nums; }
 .hist-line-pt { color: var(--label); }
 .hist-empty { padding: 24px 16px; color: var(--label); font-size: 13px; text-align: center; }
-.hist-pt { flex-shrink: 0; padding: 1px 6px; border-radius: 3px; font-size: 11px; white-space: nowrap; }
-.hist-pt-cash { color: var(--cash); background: var(--cash-bg); }
-.hist-pt-pp { color: var(--pp); background: var(--pp-bg); }
-.hist-pt-sq { color: var(--pay); background: var(--pay-bg); }
+/* 支払い方法は、商品カードの「現金」「PayPay」「Square」と同じく、文字の左に色の縦線を付ける */
+.hist-pt { display: inline-flex; flex-shrink: 0; align-items: center; gap: 5px; color: var(--ink); font-size: 11px; white-space: nowrap; }
+.hist-pt::before { content: ""; width: 3px; height: 12px; }
+.hist-pt-cash::before { background: var(--cash); }
+.hist-pt-pp::before { background: var(--pp); }
+.hist-pt-sq::before { background: var(--pay); }
 
 /* ---------- 未確定バー ---------- */
 .draft-bar {
@@ -902,6 +904,14 @@ kbd {
 .numpad-display strong { display: block; font-size: 40px; }
 .numpad-display span { color: var(--text-sub); }
 .numpad-display b { font-size: 20px; color: var(--text); }
+/* 個数と料金を入れるテンキー（現金・PayPay）。押した欄に数字が入る */
+.price-pad { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; padding: 14px 0 10px; }
+.price-box { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; padding: 8px 12px; font: inherit; color: var(--text); text-align: right; background: #f6f8f9; border: 2px solid transparent; border-radius: 6px; cursor: pointer; }
+.price-box span { color: var(--text-sub); font-size: 12px; }
+.price-box b { font-size: 30px; font-weight: 500; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.price-box.active { background: #fff; border-color: var(--accent); }
+.price-note { grid-column: 1 / -1; margin: 0; color: var(--text-sub); font-size: 13px; text-align: right; }
+.custom-mark { margin-left: 6px; padding: 0 5px; color: var(--text-sub); border: 1px solid var(--line); border-radius: 3px; font-size: 10px; }
 .numpad-keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .numpad-key {
     height: 56px;
@@ -956,12 +966,12 @@ kbd {
     .tab { min-width: 64px; padding: 10px 10px 8px; font-size: 15px; }
     .tab-sep { margin: 0 4px; }
 
-    /* レジ：上の帯は「終了・期間・担当」の下に個数と金額を 4 つ並べ、Square はその下に 1 行で出す */
+    /* レジ：上の帯は「終了・期間・担当」の下に個数（麻辣湯・ドリンク）と金額を 5 つ並べ、Square はその下に 1 行で出す */
     .reg-body { gap: 8px; padding: 8px; }
     .reg-head { gap: 8px 12px; padding: 10px 12px; }
     .reg-title { flex: 1; min-width: 0; }
     .operator { order: 2; font-size: 12px; }
-    .totals { order: 3; display: grid; grid-template-columns: auto repeat(3, minmax(0, 1fr)); width: 100%; margin-left: 0; }
+    .totals { order: 3; display: grid; grid-template-columns: auto auto repeat(3, minmax(0, 1fr)); width: 100%; margin-left: 0; }
     .total { min-width: 0; padding: 0 6px; }
     .total:first-child { padding-left: 0; border-left: none; }
     .total .kpi { font-size: 16px; }
