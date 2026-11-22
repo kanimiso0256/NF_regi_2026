@@ -4,3 +4,4 @@ system_data/settings.json
 system_data/data/
 system_data/before_move_*/
 system_data/register.lock
+system_data/settings.json.*
