@@ -160,7 +160,15 @@ class RegisterState:
         active = set(settings.get("active_terms", []))
         kinds = {ADJUST_TERM: "adjust", TEST_TERM: "test"}
         terms = settings.get("terms", []) + list(SPECIAL_TERMS)
-        return {"terms": [{"name": t, "enabled": t in active, "kind": kinds.get(t, "normal")} for t in terms]}
+        dates = term_dates(settings)
+        today = date.today()
+        return {
+            "terms": [{"name": t, "enabled": t in active, "kind": kinds.get(t, "normal"),
+                       "date": dates[t].isoformat() if t in dates else ""} for t in terms],
+            # 今日でない期間で販売を始めようとしたら、画面で確認を出す（日付は親機の時計）
+            "today": today.isoformat(),
+            "today_term": term_for_date(settings, today),
+        }
 
     # ---------- 管理者設定 ----------
     def admin_login(self, t, password):
@@ -196,6 +204,7 @@ class RegisterState:
             "active_terms": settings.get("active_terms", []),
             "targets": {x: int(targets.get(x, 0) or 0) for x in terms},
             "hours": {x: dict(zip(("start", "end"), analytics.open_hours(settings, x))) for x in terms},
+            "dates": {x: (settings.get("dates") or {}).get(x, "") for x in terms},
             "operating": operating,
         }
 
@@ -222,6 +231,18 @@ class RegisterState:
         # 営業時間が送られてこなかった期間は、保存済みの時間のまま（古い画面から保存したときに初期値へ戻さない）
         saved_hours = self.dm.load_settings().get("hours") or {}
         hours = {x: self._check_hours(x, (data.get("hours") or {}).get(x) or saved_hours.get(x)) for x in terms}
+        # 日付も同じく、送られてこなければ保存済みのまま。空欄は「日付を決めない」
+        given = data.get("dates")
+        saved_dates = self.dm.load_settings().get("dates") or {}
+        dates = {}
+        for x in terms:
+            v = (given or {}).get(x, "") if given is not None else saved_dates.get(x, "")
+            v = self._check_date(x, v)
+            if v:
+                if v in dates.values():
+                    other = next(k for k, d in dates.items() if d == v)
+                    raise RegisterError(f"「{other}」と「{x}」の日付が同じです（1 日に 1 つの期間にしてください）")
+                dates[x] = v
         selectable = set(terms) | set(SPECIAL_TERMS)
         active = [x for x in data.get("active_terms") or [] if x in selectable]
 
@@ -232,6 +253,7 @@ class RegisterState:
                 "menu": menu,
                 "targets": targets,
                 "hours": hours,
+                "dates": dates,
                 "active_terms": active,
             })
             self.dm.save_settings_file(settings)
@@ -325,8 +347,10 @@ class RegisterState:
                 raise RegisterError("期間を指定してください")
             order_terms = dict(self._sq_imported)
             import_days = set(self._sq_import_days.get(term, ()))
-        auto = load_config(self.dm.load_settings())["auto_import"]
+        settings = self.dm.load_settings()
+        auto = load_config(settings)["auto_import"]
         today = date.today()
+        today_term = term_for_date(settings, today) or current
 
         def belongs(payment, day):
             # 取り込んだ会計は、取り込んだ期間の Square 実績に数える。
@@ -334,11 +358,11 @@ class RegisterState:
             x = order_terms.get(payment["order_id"])
             if x is not None:
                 return x == term
-            return term == current and day == today
+            return term == today_term and day == today
 
         # Square への問い合わせは時間がかかることがあるので、ロックは持たずに行う。
         # 自動取り込みがオフのときは、会計がどの期間のものか分からないので、その日の決済をすべて数える
-        result = self.square.reconcile(term, include_today=term in (current, mine), refresh=refresh,
+        result = self.square.reconcile(term, include_today=term in (current, mine, today_term), refresh=refresh,
                                        belongs=belongs if auto else None, extra_days=import_days)
         with self._lock:
             result["unmatched"] = [u for u in self._sq_unmatched if u["term"] == term]
@@ -396,11 +420,23 @@ class RegisterState:
             if self._import_term() != term:
                 return
             new = [o for o in orders if o.get("id") and o["id"] not in self._sq_imported]
-            qty = sum(self._import_order(o, term) for o in new)
+            # 会計の日付に期間を決めてあれば、その期間に取り込む（タブの押し間違いで別の期間に入らないように）。
+            # 決めていなければ、今までどおり最後に販売を始めた端末の期間
+            settings = self.dm.load_settings()
+            touched = {}
+            qty = 0
+            for o in new:
+                closed = _local_time(o.get("closed_at"))
+                target = term_for_date(settings, closed.date()) if closed else None
+                target = target or term
+                qty += self._import_order(o, target)
+                touched[target] = touched.get(target, 0) + 1
+            for x in touched:
+                self._save_term(x)
             if new:
-                self._save_term(term)
                 self._sq_status["last_import"] = {
-                    "time": datetime.now().strftime("%H:%M"), "orders": len(new), "qty": qty, "term": term}
+                    "time": datetime.now().strftime("%H:%M"), "orders": len(new), "qty": qty,
+                    "term": "・".join(touched)}
         self._set_sq_status("ok")
 
     def _import_order(self, order, term):
@@ -496,6 +532,17 @@ class RegisterState:
             if n in seen:
                 raise RegisterError(f"{label}「{n}」が重複しています")
             seen.add(n)
+
+    @staticmethod
+    def _check_date(term, v):
+        """期間の日付 "YYYY-MM-DD"（空欄なら ""）"""
+        v = str(v or "").strip()
+        if not v:
+            return ""
+        try:
+            return date.fromisoformat(v).isoformat()
+        except ValueError:
+            raise RegisterError(f"「{term}」の日付は 2026-11-20 のように入力してください")
 
     @staticmethod
     def _check_hours(term, h):
@@ -749,6 +796,26 @@ class RegisterState:
             return
         rows = [SimpleNamespace(name=name, counts={"term": c}) for name, c in self._term_counts(term).items()]
         self.dm.save_csv_data(f"{term}.csv", rows)
+
+
+def term_dates(settings):
+    """期間 → 日付（date）。Settings で日付を決めた期間だけ"""
+    out = {}
+    for term, v in (settings.get("dates") or {}).items():
+        try:
+            out[term] = date.fromisoformat(str(v))
+        except ValueError:
+            continue
+    return out
+
+
+def term_for_date(settings, day):
+    """その日付に決めた期間（なければ None）。期間の一覧から消した期間は使わない"""
+    terms = set(settings.get("terms", []))
+    for term, d in term_dates(settings).items():
+        if d == day and term in terms:
+            return term
+    return None
 
 
 MAX_CUSTOM_AMOUNT = 1_000_000   # 手入力の料金の上限（打ち間違いで桁が増えたときのため）

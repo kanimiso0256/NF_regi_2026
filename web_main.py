@@ -41,6 +41,7 @@ PORT = 5002
 SQUARE_SYNC_SEC = 15   # Square の会計を取り込む間隔
 LOCAL_ADDRS = ("127.0.0.1", "::1")
 LOCK_FILE = "register.lock"   # system_data の中。動いているレジがこのファイルをつかんでおく
+EXIT_NOT_STARTED = 3          # 二重起動などで起動しなかったときの終了コード（レジ起動（親機）.bat は起動し直さない）
 
 ALREADY_RUNNING = """
 ================================================================
@@ -357,11 +358,15 @@ def main():
     # 二重起動を防ぐ（ログに書く前に確かめる）
     if not acquire_single_instance(dm.system_dir):
         print(ALREADY_RUNNING)
-        sys.exit(1)
+        sys.exit(EXIT_NOT_STARTED)
     if port_in_use(PORT):
         print(PORT_IN_USE.format(port=PORT))
-        sys.exit(1)
-    dm.log_action("System", "System", "Startup", "WebApp", "Launched")
+        sys.exit(EXIT_NOT_STARTED)
+    # 止まったあとに .bat が自動で起動し直したときは、ログに残して後から分かるようにする
+    restarted = "--restarted" in sys.argv
+    dm.log_action("System", "System", "Startup", "WebApp", "Restarted" if restarted else "Launched")
+    if restarted:
+        print("※ レジが止まったため、自動で起動し直しました")
     dev = "--dev" in sys.argv
     lan = "--lan" in sys.argv
     state = RegisterState(dm)

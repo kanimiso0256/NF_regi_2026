@@ -194,7 +194,9 @@ async function openRegister() {
 // 期間の一覧（Settings での「レジで選択可」も含む）をサーバーから読み直す
 async function loadRegTerms() {
     try {
-        ui.regTerms = (await api("/pc/api/dashboard")).terms;
+        const d = await api("/pc/api/dashboard");
+        ui.regTerms = d.terms;
+        ui.regToday = { date: d.today, term: d.today_term };
     } catch {
         ui.regTerms = ui.regTerms || [];
     }
@@ -224,10 +226,34 @@ function showRegIdle() {
     showView("register");
 }
 
+// 期間に日付を決めてあり、今日の期間ではないときは確認する（タブの押し間違いを防ぐ）。続けてよければ true
+async function confirmTermDate(t) {
+    try {
+        // ページを開いたまま日付が変わることもあるので、毎回親機に今日の日付を聞く
+        const d = await api("/pc/api/dashboard");
+        ui.regToday = { date: d.today, term: d.today_term };
+    } catch {
+        // つながらないときは前に聞いた日付で確かめる
+    }
+    const today = ui.regToday || {};
+    if (t.kind !== "normal" || !today.date) return true;
+    const md = (iso) => iso.slice(5).replace("-", "/").replace(/^0/, "").replace("/0", "/");
+    let message = null;
+    if (today.term && today.term !== t.name) {
+        message = `今日（${md(today.date)}）は「${today.term}」です。\n「${t.name}」で販売しますか？`;
+    } else if (!today.term && t.date && t.date !== today.date) {
+        message = `「${t.name}」は ${md(t.date)} の期間です。\n今日（${md(today.date)}）「${t.name}」で販売しますか？`;
+    }
+    if (!message) return true;
+    return confirmModal("期間の確認", message, `「${t.name}」で販売する`, true);
+}
+
 async function selectRegTerm(mode) {
     const t = (ui.regTerms || []).find((x) => x.name === mode);
     if (!t || !t.enabled) return;
     const s = ui.state;
+    if (s.active && mode === s.mode) return;
+    if (!(await confirmTermDate(t))) return;
     if (!s.active) {
         await startOperation(mode);
         return;

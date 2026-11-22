@@ -16,6 +16,12 @@
  *   4. スプレッドシートを「リンクを知っている全員（閲覧者）」で共有する
  *
  * ウェブアプリの URL を知っていれば誰でもデータを送れてしまうので、URL はスプレッドシートのリンクと違い、人に教えないこと。
+ *
+ * 売上のログのバックアップ
+ *   親機はログ（current_log.csv）も少しずつ送ってくる。このスプレッドシートとは別に、自分のドライブに
+ *   「NF 売上バックアップ（ログ）」というスプレッドシートを自動で作って書き足す（共有はしないので、人には見えない）。
+ *   親機の PC が壊れたときは、そのスプレッドシートを CSV でダウンロードすれば、ログから売上を作り直せる。
+ *   このファイルを貼り直したときは「デプロイを管理」→ 編集 →「新バージョン」でデプロイし直すこと（URL は変わらない）
  */
 
 const SHEET_SUMMARY = "まとめ";
@@ -23,6 +29,8 @@ const SHEET_ITEMS = "商品別";
 const SHEET_HOURLY = "時間別";
 const YEN = "¥#,##0";
 const CHART_VERSION = 3;   // グラフの作り方を変えたら上げる（次の更新で作り直す）
+const BACKUP_NAME = "NF 売上バックアップ（ログ）";
+const LOG_HEADER = ["Timestamp", "User", "Terminal", "Location", "Action", "Target", "Value"];
 
 // ブラウザでウェブアプリの URL を開いたときの表示（公開の設定が正しいかの確認用）
 function doGet() {
@@ -39,12 +47,50 @@ function doPost(e) {
     writeItems(sheetOf(ss, SHEET_ITEMS), data);
     writeHourly(sheetOf(ss, SHEET_HOURLY), data);
     removeDefaultSheet(ss);
-    return reply({ ok: true });
+    const res = { ok: true };
+    if (data.log) Object.assign(res, appendLog(data.log));
+    return reply(res);
   } catch (err) {
     return reply({ ok: false, error: String(err) });
   } finally {
     lock.releaseLock();
   }
+}
+
+// バックアップ用のスプレッドシート（なければ作る。ID はスクリプトのプロパティに覚えておく）
+function backupBook() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty("BACKUP_ID");
+  if (id) {
+    try {
+      return SpreadsheetApp.openById(id);
+    } catch (err) {
+      // 消されていたら作り直す
+    }
+  }
+  const book = SpreadsheetApp.create(BACKUP_NAME);
+  props.setProperty("BACKUP_ID", book.getId());
+  return book;
+}
+
+// ログの start 行目（0 から数える）からの rows を書き足し、書き足したあとの行数を返す。
+// 送り直しで重なった行は飛ばす。間が空いている（start が今の行数より後）ときは書かずに今の行数を返す
+function appendLog(log) {
+  const book = backupBook();
+  const sh = book.getSheets()[0];
+  if (sh.getLastRow() === 0) {
+    sh.getRange(1, 1, 1, LOG_HEADER.length).setValues([LOG_HEADER]).setFontWeight("bold");
+    sh.setFrozenRows(1);
+  }
+  const count = Math.max(sh.getLastRow() - 1, 0);
+  const start = Number(log.start) || 0;
+  const rows = (log.rows || []).slice(Math.max(count - start, 0));
+  if (start <= count && rows.length) {
+    const range = sh.getRange(count + 2, 1, rows.length, LOG_HEADER.length);
+    range.setNumberFormat("@");   // 日時や「+1」を数字・日付に変えられないよう、文字のまま書く
+    range.setValues(rows.map((r) => LOG_HEADER.map((_, i) => String(r[i] === undefined ? "" : r[i]))));
+  }
+  return { log_count: Math.max(sh.getLastRow() - 1, 0), backup_url: book.getUrl() };
 }
 
 function reply(obj) {
