@@ -7,6 +7,10 @@
 
 送るのは期間ごとの売上・目標・会計件数・現金・PayPay・Square の内訳、商品ごとの個数と売上、時間別の売上。
 中身が変わったときと、最後に送ってから HEARTBEAT_SEC たったとき（最終更新の時刻を進めるため）だけ送る。
+
+あわせて、売上のログ（current_log.csv）を、まだ送っていない行だけ LOG_BATCH 行ずつ送る。
+スクリプトはそれを共有しない別のスプレッドシート（バックアップ）に書き足す。親機の PC が壊れても、
+このログから売上を作り直せる。スクリプトは書き足したあとの行数を返すので、次はその続きから送る。
 """
 import json
 import logging
@@ -25,6 +29,10 @@ INTERVAL_SEC = 60        # 変わったかどうかを調べる間隔
 HEARTBEAT_SEC = 300      # 変わっていなくても、この間隔で送る
 TIMEOUT_SEC = 30
 SPECIAL_TERMS = ("テスト", "調整")
+LOG_BATCH = 500          # 1 回に送るログの行数
+LOG_COLUMNS = 7
+OLD_SCRIPT = ("スプレッドシートの Apps Script が古いため、ログのバックアップが取れていません。"
+              "share/dashboard_sheet.gs を貼り直し、「デプロイを管理」→ 編集 →「新バージョン」でデプロイし直してください")
 
 
 def load_config(settings):
@@ -86,7 +94,9 @@ class SheetSharer:
         self._lock = threading.Lock()      # 送信が同時に 2 つ走らないように
         self._last_body = None
         self._last_sent = 0.0
-        self.status = {"state": "off", "message": "", "sent_at": None}
+        self._log_sent = None              # バックアップに書き終えたログの行数（スクリプトが返す。起動直後は不明）
+        self._log_retry_at = 0.0           # 古いスクリプト（行数を返さない）のとき、次にバックアップを試す時刻
+        self.status = {"state": "off", "message": "", "sent_at": None, "backup": None}
 
     # ---------- 設定 ----------
     def settings_view(self):
@@ -105,8 +115,11 @@ class SheetSharer:
         settings["share"] = {"url": url, "enabled": enabled}
         self.dm.save_settings_file(settings)
         self._last_body = None      # 設定を変えたらすぐ送り直す
+        self._log_sent = None       # URL が変わったかもしれないので、バックアップの行数も聞き直す
+        self._log_retry_at = 0.0
         if not enabled:
-            self.status = {"state": "off", "message": "", "sent_at": self.status.get("sent_at")}
+            self.status = {"state": "off", "message": "", "sent_at": self.status.get("sent_at"),
+                           "backup": self.status.get("backup")}
 
     # ---------- 送信 ----------
     def push(self, force=False):
@@ -120,9 +133,14 @@ class SheetSharer:
             payload = build_payload(self.dm)
             body = json.dumps(payload, ensure_ascii=False, sort_keys=True)
             now = time.monotonic()
-            if not force and body == self._last_body and now - self._last_sent < HEARTBEAT_SEC:
+            rows = log_rows(self.dm.log_path)
+            # 古いスクリプトのときは、毎分送り直さず HEARTBEAT_SEC ごとに試す（貼り直されたら気づけるように）
+            pending = (self._log_sent < len(rows)) if self._log_sent is not None else now >= self._log_retry_at
+            if not force and not pending and body == self._last_body and now - self._last_sent < HEARTBEAT_SEC:
                 return self.status
             payload["updated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+            start = min(self._log_sent or 0, len(rows))
+            payload["log"] = {"start": start, "rows": rows[start:start + LOG_BATCH]}
             try:
                 res = requests.post(conf["url"], json=payload, timeout=TIMEOUT_SEC)
                 result = res.json() if res.ok else None
@@ -131,10 +149,28 @@ class SheetSharer:
                 res = None
             if result and result.get("ok"):
                 self._last_body, self._last_sent = body, now
-                self.status = {"state": "ok", "message": "", "sent_at": datetime.now().strftime("%H:%M:%S")}
+                message, backup = "", self.status.get("backup")
+                if isinstance(result.get("log_count"), int):
+                    self._log_sent = result["log_count"]
+                    backup = {"rows": self._log_sent, "total": len(rows), "url": result.get("backup_url") or ""}
+                else:
+                    message = OLD_SCRIPT
+                    self._log_retry_at = now + HEARTBEAT_SEC
+                self.status = {"state": "ok", "message": message, "sent_at": datetime.now().strftime("%H:%M:%S"),
+                               "backup": backup}
             else:
                 self.status = {**self.status, "state": "error", "message": _error_text(res, result)}
             return self.status
+
+
+def log_rows(log_path):
+    """ログの行（見出しを除く）。列の数を LOG_COLUMNS にそろえる"""
+    out = []
+    for row in sales_log.read_rows(log_path):
+        if not row:
+            continue
+        out.append((list(row) + [""] * LOG_COLUMNS)[:LOG_COLUMNS])
+    return out
 
 
 def _error_text(res, result):

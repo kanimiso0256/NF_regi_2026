@@ -90,6 +90,7 @@ function loadSettingsModel(s) {
         terms: s.terms.map((t) => ({
             name: t, active: active.has(t), target: s.targets[t] || 0,
             start: s.hours?.[t]?.start || "09:00", end: s.hours?.[t]?.end || "18:00",
+            date: s.dates?.[t] || "",
         })),
         specials: s.special_terms.map((t) => ({ name: t, active: active.has(t) })),
         menu: s.menu.map((m) => ({ ...m })),
@@ -113,6 +114,7 @@ function renderSettings(message = "") {
             <td><input class="field" data-list="terms" data-i="${i}" data-k="name" value="${esc(t.name)}"></td>
             <td class="center"><input type="checkbox" data-list="terms" data-i="${i}" data-k="active" ${t.active ? "checked" : ""}></td>
             <td><input class="field num" type="number" min="0" step="1000" data-list="terms" data-i="${i}" data-k="target" value="${t.target}"></td>
+            <td><input class="field date" type="date" data-list="terms" data-i="${i}" data-k="date" value="${esc(t.date)}"></td>
             <td class="hours">
                 <input class="field" type="time" data-list="terms" data-i="${i}" data-k="start" value="${esc(t.start)}">
                 <span>〜</span>
@@ -124,6 +126,7 @@ function renderSettings(message = "") {
         <tr class="special">
             <td>${esc(t.name)}</td>
             <td class="center"><input type="checkbox" data-list="specials" data-i="${i}" data-k="active" ${t.active ? "checked" : ""}></td>
+            <td class="muted">—</td>
             <td class="muted">—</td>
             <td class="muted">—</td>
             <td></td>
@@ -150,11 +153,11 @@ function renderSettings(message = "") {
         </header>
         ${settings.operating ? `<p class="notice">レジが販売中です。メニューの変更は、次にレジを開始したときに反映されます。</p>` : ""}
         <div class="settings-grid">
-            <article class="panel">
+            <article class="panel terms-panel">
                 <p class="eyebrow">TERMS</p>
                 <h3 class="panel-title">期間と目標金額</h3>
                 <table class="edit-table">
-                    <thead><tr><th>期間名</th><th class="center">レジで選択可</th><th>目標金額（円）</th><th>営業時間</th><th></th></tr></thead>
+                    <thead><tr><th>期間名</th><th class="center">レジで選択可</th><th>目標金額（円）</th><th>日付</th><th>営業時間</th><th></th></tr></thead>
                     <tbody>${termRows}${specialRows}</tbody>
                 </table>
                 <button class="btn btn-ghost btn-small" data-set="add" data-list="terms">＋ 期間を追加</button>
@@ -393,6 +396,17 @@ function shareStatusText(s) {
     return "";
 }
 
+// 売上のログのバックアップ（共有しない別のスプレッドシート）の進み具合
+function backupStatusHtml(s) {
+    if (!s) return "";
+    if (s.message) return `<p class="sq-error share-backup">${esc(s.message)}</p>`;
+    const b = s.backup;
+    if (!b) return "";
+    const link = b.url ? `（<a href="${esc(b.url)}" target="_blank" rel="noopener">バックアップを開く</a>）` : "";
+    const done = b.rows >= b.total;
+    return `<p class="muted share-backup">ログのバックアップ：${done ? "すべて送りました" : `${b.rows.toLocaleString()} / ${b.total.toLocaleString()} 行（1 分ごとに続きを送ります）`}${link}</p>`;
+}
+
 function sharePanelHtml() {
     const q = settings.share;
     const head = `
@@ -418,6 +432,7 @@ function sharePanelHtml() {
             <button class="btn btn-primary" data-set="share-save">共有の設定を保存</button>
             <span class="muted lan-help">${shareStatusText(q.status)}</span>
         </div>
+        ${backupStatusHtml(q.status)}
         <p class="settings-msg sq-msg">${esc(q.msg)}</p>`;
 }
 
@@ -515,6 +530,7 @@ async function saveSettings() {
         active_terms: [...m.terms, ...m.specials].filter((t) => t.active).map((t) => t.name.trim()),
         targets: Object.fromEntries(m.terms.map((t) => [t.name.trim(), t.target])),
         hours: Object.fromEntries(m.terms.map((t) => [t.name.trim(), { start: t.start, end: t.end }])),
+        dates: Object.fromEntries(m.terms.map((t) => [t.name.trim(), t.date || ""])),
         menu: m.menu,
     };
     try {
