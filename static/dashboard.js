@@ -91,10 +91,30 @@ function renderDashboard(d) {
     }
     $("spark").innerHTML = sparkline(d.trend);
     $("ov-count").textContent = d.transactions.toLocaleString() + "件";
-    $("ov-average").textContent = d.average === null ? "—" : yenJp(d.average);
+    renderForecast(d.forecast);
     const change = $("ov-change");
     change.textContent = d.change === null ? "—" : signedPct(d.change);
     change.className = "kpi kpi-s" + (d.change === null ? "" : d.change >= 0 ? " up" : " down");
+}
+
+// 予想売上（閉店時の売上の見込み）。何をもとに出したかはマウスを乗せると分かる
+function renderForecast(f) {
+    const el = $("ov-forecast");
+    const text = {
+        before: ["開店前", "開店してから予想を出します"],
+        unknown: ["—", "Settings でこの期間の日付を決めると予想を出します"],
+    }[f.status];
+    if (text) {
+        [el.textContent, el.title] = text;
+    } else if (f.value === null) {
+        el.textContent = "—";
+        el.title = "開店から 30 分たつと予想を出します";
+    } else {
+        el.textContent = yenJp(f.value);
+        el.title = f.status === "closed" ? "営業終了（確定した売上）"
+            : f.basis === "pace" ? "今のペースで閉店まで売れた場合"
+            : `「${f.basis}」の売れ方をもとにした予想`;
+    }
 }
 
 // ---------- 時間別売上（折れ線） ----------

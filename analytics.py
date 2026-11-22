@@ -5,12 +5,16 @@
 金額の書かれていない古い記録だけは今の値段で計算する（sales_log.py）。
 個数は期間ごとの CSV（<期間>.csv）、時間別売上・売上の推移・会計件数はログから計算する。
 
+予想売上（閉店時の売上の見込み）は、営業時間のうちどれだけ過ぎたかと、
+同じ営業時間の前の期間がその時点までに 1 日の売上の何割を売っていたかから出す（_forecast）。
+
 ログでは 1 回の会計が
     CommitOrder（PC での確定）または SquareImport（Square の会計の取り込み）
     Add / Sub（商品ごとの増減。Location が期間名）
 の順に書かれるので、その直後に続く Add/Sub をまとめて 1 件として数える。
 """
 from collections import defaultdict
+from datetime import date, datetime, timedelta
 
 import sales_log
 
@@ -18,9 +22,11 @@ COMMIT_ACTIONS = ("CommitOrder", "SquareImport")
 DEFAULT_OPEN = ("09:00", "18:00")   # 営業時間が設定されていない期間の時間帯（時間別売上はこの範囲を必ず表示する）
 MAX_TREND_POINTS = 80
 MIX_MAX_ITEMS = 5         # これより多い商品は「その他」にまとめる
+FORECAST_MIN_ELAPSED = timedelta(minutes=30)   # 開店直後は予想がぶれるので出さない
+FORECAST_MIN_SHARE = 0.05  # 前の期間がこの割合も売っていない時点では、その売れ方を使わない
 
 
-def build(dm, term=None, current_mode=None):
+def build(dm, term=None, current_mode=None, now=None):
     settings = dm.load_settings()
     terms = settings.get("terms", [])
     prices = {m["name"]: int(m.get("price", 0)) for m in settings.get("menu", [])}
@@ -51,7 +57,7 @@ def build(dm, term=None, current_mode=None):
         "target": target,
         "rate": sales / target * 100 if target else None,
         "transactions": transactions,
-        "average": round(sales / transactions) if transactions else None,
+        "forecast": _forecast(settings, dm.log_path, prices, terms, term, sales, sales_by_term, now or datetime.now()),
         "prev_term": prev_term,
         "change": change,
         "hourly": hourly,
@@ -61,6 +67,75 @@ def build(dm, term=None, current_mode=None):
         "pay": pay,
         "trend": trend,
     }
+
+
+def _term_date(settings, term):
+    try:
+        return date.fromisoformat(str((settings.get("dates") or {}).get(term, "")))
+    except ValueError:
+        return None
+
+
+def _open_window(settings, term, day):
+    """その日の開店・閉店の日時"""
+    start, end = open_hours(settings, term)
+    to_dt = lambda hm: datetime.combine(day, datetime.strptime(hm, "%H:%M").time())
+    return to_dt(start), to_dt(end)
+
+
+def _forecast(settings, log_path, prices, terms, term, sales, sales_by_term, now):
+    """閉店時の売上の予想 {"status", "value", "basis"}。
+
+    status: "live"（営業中）/ "before"（開店前）/ "closed"（営業終了。value は確定した売上）/ "unknown"（日付が未設定）
+    basis:  予想に使った前の期間の名前、または "pace"（今のペースが閉店まで続いた場合）
+    """
+    day = _term_date(settings, term)
+    if day is None:
+        return {"status": "unknown", "value": None, "basis": None}
+    open_at, close_at = _open_window(settings, term, day)
+    if now < open_at:
+        return {"status": "before", "value": None, "basis": None}
+    if now >= close_at or close_at <= open_at:
+        return {"status": "closed", "value": sales, "basis": None}
+
+    elapsed = now - open_at
+    if elapsed < FORECAST_MIN_ELAPSED or sales <= 0:
+        return {"status": "live", "value": None, "basis": None}
+    progress = elapsed / (close_at - open_at)
+
+    # 同じ営業時間で売上のある、いちばん近い前の期間の売れ方を使う
+    hours = open_hours(settings, term)
+    earlier = [t for t in terms[:terms.index(term)]
+               if sales_by_term.get(t, 0) > 0 and open_hours(settings, t) == hours and _term_date(settings, t)]
+    if earlier:
+        ref = earlier[-1]
+        ref_open, ref_close = _open_window(settings, ref, _term_date(settings, ref))
+        until = ref_open + (ref_close - ref_open) * progress
+        points = _term_points(log_path, prices, ref)
+        total = sum(a for _, a in points)
+        share = sum(a for dt, a in points if dt <= until) / total if total > 0 else 0
+        if share >= FORECAST_MIN_SHARE:
+            return {"status": "live", "value": max(sales, round(sales / share)), "basis": ref}
+
+    return {"status": "live", "value": max(sales, round(sales / progress)), "basis": "pace"}
+
+
+def _term_points(log_path, prices, term):
+    """期間の売上の記録 [(日時, 金額)]。リセットがあればそこまでの分は使わない（term_amounts と同じ扱い）"""
+    points = []
+    for row in sales_log.read_rows(log_path):
+        if len(row) >= 7 and ((row[4] == "ResetData" and row[5].replace(".csv", "") == term)
+                              or row[4] == "Factory Reset"):
+            points = []
+            continue
+        e = sales_log.parse_count_row(row)
+        if e is None or e["term"] != term or e["ptype"] not in sales_log.PTYPES:
+            continue
+        try:
+            points.append((sales_log.row_time(e), sales_log.amount_of(e, prices)))
+        except ValueError:
+            continue
+    return points
 
 
 def _pick_term(term, terms, current_mode, sales_by_term):
