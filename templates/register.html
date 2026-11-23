@@ -61,7 +61,8 @@
                 <nav class="tabs" id="dash-tabs"></nav>
                 <!-- 左に 4 つのパネル（2 × 2）、右に縦長の「Square」の列（照合と支払い方法の内訳） -->
                 <div class="dash-grid">
-                    <article class="panel">
+                    <article class="panel panel-click" id="hourly-panel" role="button" tabindex="0" aria-label="時間別売上の詳細を開く">
+                        <span class="panel-more" aria-hidden="true">詳細 ›</span>
                         <p class="eyebrow">HOURLY SALES</p>
                         <h2 class="panel-title">時間別売上<span class="open-hours" id="open-hours"></span></h2>
                         <div class="kpis">

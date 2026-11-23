@@ -5,8 +5,9 @@
 金額の書かれていない古い記録だけは今の値段で計算する（sales_log.py）。
 個数は期間ごとの CSV（<期間>.csv）、時間別売上・売上の推移・会計件数はログから計算する。
 
-予想売上（閉店時の売上の見込み）は、営業時間のうちどれだけ過ぎたかと、
-同じ営業時間の前の期間がその時点までに 1 日の売上の何割を売っていたかから出す（_forecast）。
+予想売上（閉店時の売上の見込み）は、開店時刻が同じ前の期間すべて（4日目なら 1〜3日目）が、
+同じ時刻までに閉店時刻までの売上の何割を売っていたか（の平均）から出す（_forecast）。
+前の期間より閉店が遅い日は、はみ出た時間を前の期間の閉店前 2 時間のペースで延ばして考える。
 
 ログでは 1 回の会計が
     CommitOrder（PC での確定）または SquareImport（Square の会計の取り込み）
@@ -23,7 +24,8 @@ DEFAULT_OPEN = ("09:00", "18:00")   # 営業時間が設定されていない期
 MAX_TREND_POINTS = 80
 MIX_MAX_ITEMS = 5         # これより多い商品は「その他」にまとめる
 FORECAST_MIN_ELAPSED = timedelta(minutes=30)   # 開店直後は予想がぶれるので出さない
-FORECAST_MIN_SHARE = 0.05  # 前の期間がこの割合も売っていない時点では、その売れ方を使わない
+FORECAST_MIN_SHARE = 0.05  # 前の期間が平均でこの割合も売っていない時刻（開店直後）は、予想を出さない
+FORECAST_TAIL = timedelta(hours=2)   # 閉店が遅い日に延ばすときに使う、前の期間の閉店前の時間
 
 
 def build(dm, term=None, current_mode=None, now=None):
@@ -40,7 +42,7 @@ def build(dm, term=None, current_mode=None, now=None):
     sales, mix = _term_sales(dm, term, amounts)
     pay = _pay_split(amounts, term)
     hours = open_hours(settings, term)
-    hourly, trend, transactions = _scan_log(dm.log_path, term, prices, hours)
+    hourly, trend, transactions, _detail = _scan_log(dm.log_path, term, prices, hours)
 
     idx = terms.index(term)
     prev_term = terms[idx - 1] if idx > 0 else None
@@ -87,7 +89,7 @@ def _forecast(settings, log_path, prices, terms, term, sales, sales_by_term, now
     """閉店時の売上の予想 {"status", "value", "basis"}。
 
     status: "live"（営業中）/ "before"（開店前）/ "closed"（営業終了。value は確定した売上）/ "unknown"（日付が未設定）
-    basis:  予想に使った前の期間の名前、または "pace"（今のペースが閉店まで続いた場合）
+    basis:  予想に使った前の期間の名前のリスト、または "pace"（今のペースが閉店まで続いた場合）
     """
     day = _term_date(settings, term)
     if day is None:
@@ -103,21 +105,39 @@ def _forecast(settings, log_path, prices, terms, term, sales, sales_by_term, now
         return {"status": "live", "value": None, "basis": None}
     progress = elapsed / (close_at - open_at)
 
-    # 同じ営業時間で売上のある、いちばん近い前の期間の売れ方を使う
-    hours = open_hours(settings, term)
+    # 開店時刻が同じで売上のある前の期間すべて（4日目なら 1〜3日目）の売れ方を使う。
+    # 期間ごとに「今の時刻までに、今日の閉店時刻までの売上の何割を売っていたか」を出し、その平均で割る（どの日も同じ重み）
+    start = open_hours(settings, term)[0]
     earlier = [t for t in terms[:terms.index(term)]
-               if sales_by_term.get(t, 0) > 0 and open_hours(settings, t) == hours and _term_date(settings, t)]
-    if earlier:
-        ref = earlier[-1]
-        ref_open, ref_close = _open_window(settings, ref, _term_date(settings, ref))
-        until = ref_open + (ref_close - ref_open) * progress
-        points = _term_points(log_path, prices, ref)
-        total = sum(a for _, a in points)
-        share = sum(a for dt, a in points if dt <= until) / total if total > 0 else 0
-        if share >= FORECAST_MIN_SHARE:
-            return {"status": "live", "value": max(sales, round(sales / share)), "basis": ref}
+               if sales_by_term.get(t, 0) > 0 and open_hours(settings, t)[0] == start and _term_date(settings, t)]
+    shares = {}
+    for ref in earlier:
+        ref_day = _term_date(settings, ref)
+        ref_curve = _cumulative_curve(_term_points(log_path, prices, ref), *_open_window(settings, ref, ref_day))
+        at_close = ref_curve(datetime.combine(ref_day, close_at.time()))
+        if at_close > 0:
+            shares[ref] = ref_curve(datetime.combine(ref_day, now.time())) / at_close
+    if shares:
+        share = sum(shares.values()) / len(shares)
+        # 前の期間がまだほとんど売っていない時刻（開店直後）は、予想がぶれるので出さない
+        value = max(sales, round(sales / share)) if share >= FORECAST_MIN_SHARE else None
+        return {"status": "live", "value": value, "basis": list(shares)}
 
     return {"status": "live", "value": max(sales, round(sales / progress)), "basis": "pace"}
+
+
+def _cumulative_curve(points, ref_open, ref_close):
+    """時刻 → その時刻までの累計売上。閉店後の時刻は、閉店前 FORECAST_TAIL のペースが続いたとして延ばす"""
+    tail_from = max(ref_open, ref_close - FORECAST_TAIL)
+    tail_hours = (ref_close - tail_from).total_seconds() / 3600
+    tail_rate = sum(a for dt, a in points if tail_from < dt <= ref_close) / tail_hours if tail_hours else 0
+
+    def curve(t):
+        cum = sum(a for dt, a in points if dt <= min(t, ref_close))
+        if t > ref_close:
+            cum += max(0, tail_rate) * (t - ref_close).total_seconds() / 3600
+        return cum
+    return curve
 
 
 def _term_points(log_path, prices, term):
@@ -199,17 +219,21 @@ def _hour_range(start, end):
 
 
 def _scan_log(log_path, term, prices, hours=DEFAULT_OPEN):
+    """時間別売上・売上の推移・会計件数と、時間ごとの詳細 {"tx": {時: 会計件数}, "items": {時: {商品名: 個数}}}"""
     hourly = defaultdict(int)
     points = []          # (時刻, 累計売上)
     running = 0
     transactions = 0
-    commit = None        # 処理中の会計 {"loc": 期間, "qty": 個数の合計}
+    tx_by_hour = defaultdict(int)
+    items_by_hour = defaultdict(lambda: defaultdict(int))
+    commit = None        # 処理中の会計 {"loc": 期間, "qty": 個数の合計, "hour": 最初の商品の時}
 
     def close_commit():
         nonlocal transactions, commit
         # 取消だけの確定（個数がマイナス）は会計として数えない
         if commit and commit["loc"] == term and commit["qty"] > 0:
             transactions += 1
+            tx_by_hour[commit["hour"]] += 1
         commit = None
 
     for row in sales_log.read_rows(log_path):
@@ -219,7 +243,7 @@ def _scan_log(log_path, term, prices, hours=DEFAULT_OPEN):
         if action not in sales_log.COUNT_ACTIONS:
             close_commit()
             if action in COMMIT_ACTIONS:
-                commit = {"loc": None, "qty": 0}
+                commit = {"loc": None, "qty": 0, "hour": None}
             continue
 
         e = sales_log.parse_count_row(row)
@@ -233,6 +257,7 @@ def _scan_log(log_path, term, prices, hours=DEFAULT_OPEN):
         if commit is not None:
             if commit["loc"] is None:
                 commit["loc"] = e["term"]
+                commit["hour"] = dt.hour
             if commit["loc"] == e["term"]:
                 commit["qty"] += e["qty"]
 
@@ -240,13 +265,59 @@ def _scan_log(log_path, term, prices, hours=DEFAULT_OPEN):
             continue
         amount = sales_log.amount_of(e, prices)
         hourly[dt.hour] += amount
+        items_by_hour[dt.hour][e["name"]] += e["qty"]
         running += amount
         points.append((dt, running))
     close_commit()
 
     hours = list(hourly) + list(_hour_range(*hours))
     hourly_list = [{"hour": h, "amount": hourly.get(h, 0)} for h in range(min(hours), max(hours) + 1)]
-    return hourly_list, _downsample(points), transactions
+    detail = {"tx": dict(tx_by_hour), "items": {h: dict(v) for h, v in items_by_hour.items()}}
+    return hourly_list, _downsample(points), transactions, detail
+
+
+def hourly_detail(dm, term):
+    """時間別売上の詳細（ダッシュボードの「時間別売上」を押したときのポップアップ用）。
+
+    時間ごとの売上・会計件数・商品別の個数と、開店時刻が同じ前の期間すべて（4日目なら 1〜3日目）の
+    同じ時間の売上の平均（compare）を返す。比べられる期間がなければ compare は None
+    """
+    settings = dm.load_settings()
+    terms = settings.get("terms", [])
+    if term not in terms:
+        return {"term": None}
+    prices = {m["name"]: int(m.get("price", 0)) for m in settings.get("menu", [])}
+    hourly, _trend, _tx, detail = _scan_log(dm.log_path, term, prices, open_hours(settings, term))
+
+    start = open_hours(settings, term)[0]
+    refs = []
+    for t in terms[:terms.index(term)]:
+        if open_hours(settings, t)[0] != start:
+            continue
+        ref_hourly = _scan_log(dm.log_path, t, prices, open_hours(settings, t))[0]
+        if any(h["amount"] for h in ref_hourly):
+            refs.append((t, {h["hour"]: h["amount"] for h in ref_hourly}))
+    compare = None
+    if refs:
+        compare = {
+            "terms": [t for t, _ in refs],
+            "hourly": {h["hour"]: round(sum(r.get(h["hour"], 0) for _, r in refs) / len(refs)) for h in hourly},
+        }
+
+    menu_order = [m["name"] for m in sorted(settings.get("menu", []), key=lambda m: m.get("order", 9999))]
+    sold = {name for items in detail["items"].values() for name, q in items.items() if q}
+    items = [n for n in menu_order if n in sold] + sorted(sold - set(menu_order))
+    return {
+        "term": term,
+        "items": items,   # 表の列（メニューの順。この期間に売れたものだけ）
+        "rows": [{
+            "hour": h["hour"],
+            "amount": h["amount"],
+            "transactions": detail["tx"].get(h["hour"], 0),
+            "items": detail["items"].get(h["hour"], {}),
+        } for h in hourly],
+        "compare": compare,
+    }
 
 
 def _downsample(points):

@@ -38,6 +38,7 @@ async function refreshDashboard() {
     dash.term = data.term;
     renderDashboard(data);
     refreshDashSquare();
+    refreshHourlyDetail();
 }
 
 // グラフの表示場所の大きさが変わったら（ウィンドウの拡大縮小など）、その大きさで描き直す
@@ -108,22 +109,22 @@ function renderForecast(f) {
         [el.textContent, el.title] = text;
     } else if (f.value === null) {
         el.textContent = "—";
-        el.title = "開店から 30 分たつと予想を出します";
+        el.title = "開店直後は予想がぶれるので、もう少し売れてから予想を出します";
     } else {
         el.textContent = yenJp(f.value);
         el.title = f.status === "closed" ? "営業終了（確定した売上）"
             : f.basis === "pace" ? "今のペースで閉店まで売れた場合"
-            : `「${f.basis}」の売れ方をもとにした予想`;
+            : `${f.basis.map((t) => `「${t}」`).join("")}の売れ方をもとにした予想`;
     }
 }
 
 // ---------- 時間別売上（折れ線） ----------
-// 目盛りがきりのいい数字になるよう、1 段の幅を 1・2・2.5・5 × 10^n に切り上げる
+// 目盛りがきりのいい数字になるよう、1 段の幅を 1・1.5・2・2.5・3・4・5 × 10^n に切り上げる
 function niceMax(v, steps) {
     if (v <= 0) return 2000 * steps;   // 売上がないときも 1 段 2,000 円のきりのいい目盛りにする
     const raw = (v * 1.1) / steps;
     const mag = 10 ** Math.floor(Math.log10(raw));
-    const step = [1, 2, 2.5, 5, 10].find((s) => s * mag >= raw) * mag;
+    const step = [1, 1.5, 2, 2.5, 3, 4, 5, 10].find((s) => s * mag >= raw) * mag;
     return step * steps;
 }
 
@@ -337,3 +338,149 @@ function sparkline(trend) {
     </svg>
     <span class="spark-dot" style="left:${(last[0] / W) * 100}%; top:${(last[1] / H) * 100}%"></span>`;
 }
+
+// ---------- 時間別売上の詳細（カードを押すと、ダッシュボードのカードの場所いっぱいに広がる） ----------
+// 時間ごとの売上・会計件数・商品別の個数の表と、開店時刻が同じ前の期間（4日目なら 1〜3日目）の平均との比較。
+// × か Esc で元に戻る。開いている間はダッシュボードの更新（5 秒ごと・タブの切り替え）に合わせて中身も新しくする
+const hourlyDetailUrl = () => `/pc/api/analytics/hourly?term=${encodeURIComponent(dash.term)}`;
+
+async function openHourlyDetail() {
+    if (!dash.term || ui.modal || $("hourly-expand")) return;
+    let d;
+    try {
+        d = await api(hourlyDetailUrl());
+    } catch (e) {
+        alert(e.message);
+        return;
+    }
+    if (!d.term || $("hourly-expand")) return;
+
+    const el = document.createElement("section");
+    el.className = "hd-expand";
+    el.id = "hourly-expand";
+    el.setAttribute("role", "dialog");
+    el.setAttribute("aria-label", "時間別売上の詳細");
+    el.innerHTML = `
+        <button class="hd-close" aria-label="閉じる">×</button>
+        <div class="hd-expand-body">${hourlyDetailHtml(d)}</div>`;
+    document.querySelector(".dash-grid").appendChild(el);
+    el.querySelector(".hd-close").addEventListener("click", closeHourlyDetail);
+
+    // 押したカードの位置・大きさから広がって見えるようにする（最初の形を transform で合わせてから外す）
+    const from = $("hourly-panel").getBoundingClientRect(), to = el.getBoundingClientRect();
+    if (!matchMedia("(prefers-reduced-motion: reduce)").matches && to.width && to.height) {
+        el.classList.add("opening");
+        el.style.transform = `translate(${from.left - to.left}px, ${from.top - to.top}px) `
+            + `scale(${from.width / to.width}, ${from.height / to.height})`;
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            el.classList.remove("opening");
+            el.style.transform = "";
+        }));
+    }
+    el.querySelector(".hd-close").focus();
+}
+
+function closeHourlyDetail() {
+    const el = $("hourly-expand");
+    if (!el) return;
+    el.remove();
+    $("hourly-panel").focus();
+}
+
+async function refreshHourlyDetail() {
+    if (!$("hourly-expand") || !dash.term) return;
+    let d;
+    try {
+        d = await api(hourlyDetailUrl());
+    } catch {
+        return;   // 次の更新で再試行する
+    }
+    const body = $("hourly-expand")?.querySelector(".hd-expand-body");
+    if (body && d.term === dash.term) body.innerHTML = hourlyDetailHtml(d);
+}
+
+function hourlyDetailHtml(d) {
+    const cmp = d.compare;
+    const cmpName = cmp ? (cmp.terms.length > 1 ? `${cmp.terms.join("・")}の平均` : cmp.terms[0]) : "";
+    const total = (key) => d.rows.reduce((a, r) => a + r[key], 0);
+    const itemTotal = (name) => d.rows.reduce((a, r) => a + (r.items[name] || 0), 0);
+    const diffCell = (amount, avg, empty) => {
+        if (!cmp || empty || !avg) return `<td class="num muted">—</td>`;
+        const p = ((amount - avg) / avg) * 100;
+        return `<td class="num ${p >= 0 ? "up" : "down"}">${signedPct(p)}</td>`;
+    };
+
+    const rows = d.rows.map((r) => {
+        const empty = r.amount === 0 && r.transactions === 0;
+        const avg = cmp ? cmp.hourly[r.hour] || 0 : 0;
+        return `
+            <tr class="${empty ? "empty-row" : ""}">
+                <th scope="row">${r.hour}:00</th>
+                <td class="num">${yenJp(r.amount)}</td>
+                <td class="num">${r.transactions}件</td>
+                ${d.items.map((n) => `<td class="num">${r.items[n] || ""}</td>`).join("")}
+                ${cmp ? `<td class="num muted">${yenJp(avg)}</td>${diffCell(r.amount, avg, empty)}` : ""}
+            </tr>`;
+    }).join("");
+    const cmpTotal = cmp ? Object.values(cmp.hourly).reduce((a, v) => a + v, 0) : 0;
+    const note = cmp ? `・点線は${esc(cmpName)}` : "・比べられる前の日はまだありません";
+
+    return `
+        <p class="eyebrow">HOURLY SALES</p>
+        <h2 class="panel-title">時間別売上の詳細<span class="open-hours">${esc(d.term)}${note}</span></h2>
+        <div class="hd-chart">${compareChart(d.rows, cmp)}</div>
+        ${cmp ? `<div class="hd-legend"><span class="hd-key now"></span>${esc(d.term)}<span class="hd-key avg"></span>${esc(cmpName)}</div>` : ""}
+        <div class="hd-table-wrap">
+            <table class="hd-table">
+                <thead><tr>
+                    <th scope="col">時間</th><th scope="col" class="num">売上</th><th scope="col" class="num">会計</th>
+                    ${d.items.map((n) => `<th scope="col" class="num item">${esc(n)}</th>`).join("")}
+                    ${cmp ? `<th scope="col" class="num">${esc(cmpName)}</th><th scope="col" class="num">差</th>` : ""}
+                </tr></thead>
+                <tbody>${rows}</tbody>
+                <tfoot><tr>
+                    <th scope="row">合計</th>
+                    <td class="num">${yenJp(total("amount"))}</td>
+                    <td class="num">${total("transactions")}件</td>
+                    ${d.items.map((n) => `<td class="num">${itemTotal(n)}</td>`).join("")}
+                    ${cmp ? `<td class="num muted">${yenJp(cmpTotal)}</td><td></td>` : ""}
+                </tr></tfoot>
+            </table>
+        </div>`;
+}
+
+// 今の期間（実線）と、比べる期間の平均（点線）の時間別売上
+function compareChart(rows, cmp) {
+    const W = 880, H = 220, L = 64, R = 16, T = 12, B = 30, steps = 4;
+    const avg = (r) => (cmp ? cmp.hourly[r.hour] || 0 : 0);
+    const max = niceMax(Math.max(...rows.map((r) => Math.max(r.amount, avg(r)))), steps);
+    const n = rows.length;
+    const x = (i) => L + (n === 1 ? (W - L - R) / 2 : (i * (W - L - R)) / (n - 1));
+    const y = (v) => T + (H - T - B) * (1 - Math.max(0, v) / max);
+    const ticks = Array.from({ length: steps + 1 }, (_, i) => (max / steps) * i);
+    const line = (vals, cls) => `<polyline class="${cls}" points="${vals.map((v, i) => `${x(i)},${y(v)}`).join(" ")}"/>`;
+    return `<svg ${SVG_NS} viewBox="0 0 ${W} ${H}" role="img" aria-label="時間別売上の比較グラフ">
+        ${ticks.map((v) => `
+            <line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/>
+            <text class="axis" x="${L - 10}" y="${y(v) + 4}" text-anchor="end">${v.toLocaleString()}</text>`).join("")}
+        ${rows.map((r, i) => `<text class="axis" x="${x(i)}" y="${H - 8}" text-anchor="middle">${r.hour}:00</text>`).join("")}
+        ${cmp ? line(rows.map(avg), "avg-line") : ""}
+        ${line(rows.map((r) => r.amount), "line")}
+        ${rows.map((r, i) => `<circle class="line-dot" cx="${x(i)}" cy="${y(r.amount)}" r="4"><title>${r.hour}:00  ${yenJp(r.amount)}</title></circle>`).join("")}
+    </svg>`;
+}
+
+// カード全体を押す（またはキーボードで選んで Enter / Space）と詳細を開き、Esc で閉じる
+document.getElementById("hourly-panel").addEventListener("click", openHourlyDetail);
+document.getElementById("hourly-panel").addEventListener("keydown", (e) => {
+    if ((e.key === "Enter" || e.key === " ") && !ui.modal) {
+        e.preventDefault();
+        openHourlyDetail();
+    }
+});
+document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !ui.modal && ui.view === "dashboard" && document.getElementById("hourly-expand")) {
+        e.preventDefault();
+        closeHourlyDetail();
+    }
+});

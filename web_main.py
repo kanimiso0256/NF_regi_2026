@@ -197,6 +197,11 @@ def create_app(state, dev=False, lan=False, secret_key=None, sharer=None):
         me()
         return jsonify(state.dashboard())
 
+    @app.get("/pc/api/analytics/hourly")
+    def get_hourly_detail():
+        me()
+        return jsonify(analytics.hourly_detail(state.dm, request.args.get("term")))
+
     @app.get("/pc/api/analytics")
     def get_analytics():
         t = me()
